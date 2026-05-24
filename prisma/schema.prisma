@@ -1,0 +1,130 @@
+// Continuum schema. Postgres only.
+//
+// Local dev: `docker compose up -d` (ships in repo) → postgres on :5432.
+// Hosted:    point DATABASE_URL at Neon, Supabase, RDS, etc.
+//
+// JSON-shaped payloads (e.g. Update.raw) are stored as String for portability
+// across Postgres versions and to keep the schema trivial to migrate.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  identifier  String?
+  icon        String?
+  description String?
+  cwd         String?  @unique
+  state       String   @default("active") // active | near_launch | paused | exploring | archived
+  momentum    Int      @default(50)       // 0-100
+  health      Int      @default(100)      // 0-100
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  brain     Brain?
+  updates   Update[]
+  threads   WorkThread[]
+  decisions Decision[]
+}
+
+model Brain {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  whatIsThis         String?
+  productState       String?
+  architecture       String?
+  strategicDirection String?
+  recentProgress     String?
+  openQuestions      String?
+  nextActions        String?
+  currentFocus       String?
+
+  lastSynthesizedAt DateTime?
+  synthesisModel    String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Update {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source          String   // claude_code | codex | manual | git | prd
+  category        String   // session | decision | blocker | architecture | idea | progress | next_action
+  title           String?
+  body            String
+  raw             String?  // JSON-encoded extra payload
+  // Stable id for an in-flight coding session. Used to deduplicate when a
+  // hook re-ingests the same session (e.g. Codex `Stop` fires per-turn):
+  // the server deletes prior updates with the same (source, sourceSessionId)
+  // before reinserting the latest summary + fanout.
+  sourceSessionId String?
+  createdAt       DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([source, sourceSessionId])
+}
+
+model WorkThread {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  state       String   @default("active")
+  context     String?
+  blockers    String?
+  nextActions String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId, state])
+}
+
+model Decision {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title           String
+  rationale       String?
+  source          String?  // claude_code | codex | manual
+  sourceSessionId String?  // same dedup story as Update.sourceSessionId
+  createdAt       DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([source, sourceSessionId])
+}
+
+// Single-row settings (id = "singleton"). Each tier has its own fully
+// configurable provider so users can mix-and-match (e.g. Anthropic for
+// synthesis, Ollama for summarization). API keys are AES-256-GCM encrypted.
+model Settings {
+  id String @id @default("singleton")
+
+  // Single-user web auth. Scrypt-hashed password (see src/lib/auth.ts).
+  // Null until the user sets one via /setup. Hook/MCP API access uses
+  // CONTINUUM_TOKEN independently and ignores this.
+  passwordHash String?
+
+  // SMART tier — brain synthesis (low volume, strategic).
+  smartProvider  String  @default("anthropic")
+  smartBaseUrl   String  @default("https://api.anthropic.com")
+  smartModel     String  @default("claude-sonnet-4-6")
+  smartKeyCipher String?
+
+  // CHEAP tier — session summarization + capture classification (high volume).
+  cheapProvider  String  @default("anthropic")
+  cheapBaseUrl   String  @default("https://api.anthropic.com")
+  cheapModel     String  @default("claude-haiku-4-5")
+  cheapKeyCipher String?
+
+  updatedAt DateTime @updatedAt
+}

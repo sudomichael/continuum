@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: continuum-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: continuum
+      POSTGRES_PASSWORD: continuum
+      POSTGRES_DB: continuum
+    ports:
+      - "5432:5432"
+    volumes:
+      - continuum-pg:/var/lib/postgresql/data
+
+volumes:
+  continuum-pg:

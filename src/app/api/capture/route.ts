@@ -1,0 +1,91 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/db";
+import { classifyCapture, isValidCategory, synthesizeBrain } from "@/lib/synthesis";
+
+const Body = z.object({
+  body: z.string().min(1).max(20_000),
+  projectSlug: z.string().optional(), // override classifier
+});
+
+export async function POST(req: Request) {
+  let parsed;
+  try {
+    parsed = Body.parse(await req.json());
+  } catch (e) {
+    return NextResponse.json(
+      { error: "Invalid body", detail: String(e) },
+      { status: 400 },
+    );
+  }
+
+  let projectSlug = parsed.projectSlug ?? null;
+  let category = "session";
+  let title: string | null = null;
+
+  if (!projectSlug) {
+    try {
+      const cls = await classifyCapture(parsed.body);
+      projectSlug = cls.projectSlug;
+      category = isValidCategory(cls.category) ? cls.category : "session";
+      title = cls.title?.slice(0, 200) ?? null;
+    } catch (e) {
+      return NextResponse.json(
+        { error: "Classification failed", detail: String(e) },
+        { status: 500 },
+      );
+    }
+  }
+
+  // No matching project — create an "inbox" project so nothing is lost.
+  if (!projectSlug) {
+    const inbox = await prisma.project.upsert({
+      where: { slug: "inbox" },
+      update: {},
+      create: {
+        slug: "inbox",
+        name: "Inbox",
+        icon: "inbox",
+        description: "Unclassified captures",
+        state: "exploring",
+      },
+    });
+    projectSlug = inbox.slug;
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { slug: projectSlug },
+  });
+  if (!project) {
+    return NextResponse.json(
+      { error: `Project ${projectSlug} not found` },
+      { status: 404 },
+    );
+  }
+
+  const update = await prisma.update.create({
+    data: {
+      projectId: project.id,
+      source: "manual",
+      category,
+      title,
+      body: parsed.body,
+    },
+  });
+
+  try {
+    await synthesizeBrain(project.id);
+  } catch (e) {
+    return NextResponse.json(
+      {
+        project,
+        update,
+        warning: "Captured but synthesis failed",
+        detail: String(e),
+      },
+      { status: 200 },
+    );
+  }
+
+  return NextResponse.json({ project, update });
+}

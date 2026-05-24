@@ -1,0 +1,40 @@
+{
+  "name": "continuum",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx scripts/bootstrap.ts && next dev",
+    "build": "tsx scripts/bootstrap.ts && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "connect-claude-code": "tsx scripts/install-hook.ts && tsx scripts/install-mcp.ts",
+    "connect-codex": "tsx scripts/install-codex-hook.ts",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push --skip-generate",
+    "db:studio": "prisma studio",
+    "postinstall": "prisma generate || true"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@prisma/client": "^6.19.3",
+    "next": "16.2.6",
+    "openai": "^6.39.0",
+    "prisma": "^6.19.3",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4",
+    "tsx": "^4.22.3",
+    "typescript": "^5"
+  }
+}
