@@ -142,7 +142,31 @@ export async function pingTier(tier: TierConfig): Promise<{
     return {
       ok: false,
       latencyMs: Date.now() - t0,
-      error: e instanceof Error ? e.message : String(e),
+      error: humanizeProviderError(tier, e),
     };
   }
+}
+
+// Turn raw provider exceptions into something a user can act on. Specifically
+// catches the common Ollama failure modes (daemon not running, model not pulled).
+function humanizeProviderError(tier: TierConfig, e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+
+  if (tier.provider === "ollama") {
+    if (/ECONNREFUSED|fetch failed|Connection refused/i.test(raw)) {
+      return `Can't reach Ollama at ${tier.baseUrl}. Is the Ollama app running? (Install: https://ollama.com)`;
+    }
+    if (/model ['"]?[^'"\s]+['"]? not found|pull the model|try pulling/i.test(raw)) {
+      return `Ollama doesn't have "${tier.model}" pulled yet. Run: ollama pull ${tier.model}`;
+    }
+  }
+
+  if (/401|unauthorized|invalid api key|incorrect api key/i.test(raw)) {
+    return `API key rejected (401). Double-check it.`;
+  }
+  if (/404|not found/i.test(raw) && tier.model) {
+    return `Model "${tier.model}" not available on this provider. Check the model name.`;
+  }
+
+  return raw;
 }

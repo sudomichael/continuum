@@ -45,33 +45,52 @@ docker compose up -d
 
 Then set `DATABASE_URL=postgresql://continuum:continuum@localhost:5432/continuum` in `.env` and follow the source install above.
 
-## Connect Continuum to Claude Code
+## Connect your coding agent
 
-The headline feature: every Claude Code session in a git repo auto-registers as a project, its transcript gets summarized on session end, and that project's brain re-synthesizes. Plus Claude Code gets native tools to talk to Continuum mid-session.
+The headline feature: every coding session in a git repo auto-registers as a project, its transcript gets summarized on session end, and that project's brain re-synthesizes.
 
-```bash
-npm run connect-claude-code
-```
-
-That installs three things in `~/.claude/`:
-
-- **SessionStart hook** — auto-registers any git repo you open Claude Code in.
-- **SessionEnd hook** — summarizes the session and updates that project's brain.
-- **MCP server** — Claude Code gets tools (`continuum_register_project`, `continuum_capture`, `continuum_get_brain`, …). Say *"register this with continuum"* or *"what's blocking parcelwise?"* and Claude calls the right tools.
-
-Restart Claude Code after installing so it picks up the new hooks and MCP server. Idempotent — safe to re-run. Backs up your existing `~/.claude/settings.json`.
-
-If your Continuum is hosted (not on localhost), the installer will ask for its URL.
-
-## Connect Continuum to Codex CLI
-
-OpenAI's Codex CLI gets the same treatment:
+**One command, on any machine:**
 
 ```bash
-npm run connect-codex
+curl -fsSL https://get.getcontinuum.dev/install.sh | sh
+continuum connect
 ```
 
-That installs a hook into `~/.codex/hooks.json` so each Codex turn POSTs its transcript to Continuum. Codex doesn't yet expose a true `SessionEnd` event ([openai/codex#20603](https://github.com/openai/codex/issues/20603)) so the installer registers against `Stop` (fires per-turn). The server dedupes by `session_id`, so the project brain stays current as the session grows instead of stacking duplicate session rows. When upstream ships `SessionEnd`, swap the event name in `~/.codex/hooks.json` — no other change needed.
+That:
+
+1. Downloads the `continuum` binary into `~/.continuum/bin/` and adds it to your PATH.
+2. Opens your browser so you can authorize this machine against your Continuum server.
+3. Auto-detects every supported coding agent on your machine and offers to install hooks for each (Claude Code, OpenAI Codex CLI, more coming).
+
+Restart any open agent sessions so they pick up the new hooks. Re-run anytime — `continuum connect` is idempotent. Manage paired devices in **Settings → Connected Devices**.
+
+> **Already cloned this repo for hacking?** You can also run `npm run connect-claude-code` / `npm run connect-codex` from the repo root — same effect, no CLI install needed.
+
+### Codex CLI caveat
+
+Codex doesn't yet expose a true `SessionEnd` event ([openai/codex#20603](https://github.com/openai/codex/issues/20603)) so the installer registers against `Stop` (fires per-turn). The server dedupes by `session_id`, so the project brain stays current as the session grows instead of stacking duplicate session rows. When upstream ships `SessionEnd`, swap the event name in `~/.codex/hooks.json` — no other change needed.
+
+## Connect any other coding agent
+
+Anything that can run a shell command at session end can feed Continuum. POST the transcript to `/api/ingest`:
+
+```bash
+curl -X POST "$CONTINUUM_URL/api/ingest" \
+  -H "Content-Type: application/json" \
+  -H "X-Continuum-Token: $CONTINUUM_TOKEN" \
+  -d @- <<EOF
+{
+  "cwd": "$(pwd)",
+  "source": "claude_code",
+  "sessionId": "<stable session id, optional but recommended>",
+  "transcript": "$(cat path/to/transcript)"
+}
+EOF
+```
+
+If `sessionId` is included, Continuum dedupes per-session — handy for tools that fire mid-session (e.g. Codex's `Stop` event). The first matching `cwd` resolves to a registered project; if no project is bound to that `cwd`, hit `/api/projects/auto-register` first.
+
+Works with Cursor, Aider, Cline, Gemini CLI, Aider, custom shell wrappers — anything with a session-end hook or a way to grab the transcript.
 
 ## AI provider flexibility
 

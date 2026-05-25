@@ -1,7 +1,7 @@
 // `npm run connect-codex`
 //
 // Installs the Continuum Codex CLI hook:
-//   - copies apps/cli/continuum-codex-hook.sh to ~/.codex/continuum-codex-hook.sh
+//   - copies cli/embedded/hooks/continuum-codex-hook.sh to ~/.codex/continuum-codex-hook.sh
 //   - patches ~/.codex/hooks.json with a `Stop` hook entry pointing at it
 //
 // Codex doesn't yet expose SessionEnd (see openai/codex#20603), so we register
@@ -22,7 +22,7 @@ import { resolve } from "node:path";
 import { ensureContinuumUrl, readEnvFile } from "./lib/installer-env";
 
 const ROOT = resolve(__dirname, "..");
-const HOOK_SOURCE = resolve(ROOT, "apps/cli/continuum-codex-hook.sh");
+const HOOK_SOURCE = resolve(ROOT, "cli/embedded/hooks/continuum-codex-hook.sh");
 const CODEX_DIR = resolve(homedir(), ".codex");
 const HOOK_DEST = resolve(CODEX_DIR, "continuum-codex-hook.sh");
 const HOOKS_JSON = resolve(CODEX_DIR, "hooks.json");

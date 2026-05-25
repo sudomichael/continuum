@@ -103,6 +103,45 @@ model Decision {
   @@index([source, sourceSessionId])
 }
 
+// Per-device long-lived token issued to the CLI via browser pairing.
+// Each `continuum connect` run on a new machine creates one of these.
+// The token (sha256 hash) is verified on every /api/ingest call from
+// the hook scripts. Revoking a row immediately kills that device.
+model CliToken {
+  id         String   @id @default(cuid())
+  // sha256 hex of the actual token string. The raw token is shown
+  // exactly once during pairing and never stored.
+  tokenHash  String   @unique
+  // Human label so /settings shows "MacBook Pro" not a random id.
+  name       String
+  // Free-form OS/arch from the CLI (e.g. "darwin/arm64") for UX only.
+  platform   String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime?
+}
+
+// Short-lived pairing session created when the CLI hits /api/cli-auth/start.
+// The CLI opens /cli-auth?code=... in the browser; the logged-in user
+// authorizes; the server marks this row authorized and writes the issued
+// token here. The CLI polls /api/cli-auth/poll until status flips, then
+// reads the token + cleans up.
+model CliPairing {
+  id         String   @id @default(cuid())
+  // Random opaque code shown to both the CLI (response) and the browser
+  // (URL param). Used to look up this row from either side.
+  code       String   @unique
+  // Set when the user clicks Authorize. Until then, polls return "pending".
+  authorized Boolean  @default(false)
+  // Filled in alongside authorization — the long-lived token + new CliToken id.
+  token      String?
+  tokenId    String?
+  // CLI-supplied metadata so /cli-auth can show "device: darwin/arm64".
+  platform   String?
+  // Hard expiry — CLI must complete pairing within this window.
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+}
+
 // Single-row settings (id = "singleton"). Each tier has its own fully
 // configurable provider so users can mix-and-match (e.g. Anthropic for
 // synthesis, Ollama for summarization). API keys are AES-256-GCM encrypted.

@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { Icon } from "@/components/icon";
 import { StatusPip } from "@/components/status-pip";
 import { timeAgo } from "@/lib/format";
-import { NewProjectForm } from "./new-project-form";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +20,10 @@ export default async function ProjectsListPage() {
             Projects
           </h1>
           <p className="code-md text-on-surface-variant/70 mt-1">
-            Register a node so Continuum can ingest its sessions.
+            Auto-registered from your Claude Code sessions.
           </p>
         </div>
       </div>
-
-      <NewProjectForm />
 
       <div className="border border-outline-variant rounded-lg bg-surface-container-lowest overflow-hidden">
         <div className="grid grid-cols-[1.5fr_120px_1fr_120px_120px_100px] bg-surface-container-high border-b border-outline-variant px-4 py-2">
@@ -39,8 +36,22 @@ export default async function ProjectsListPage() {
         </div>
         <div className="divide-y divide-outline-variant/30">
           {projects.length === 0 && (
-            <div className="p-10 text-center text-on-surface-variant/60 text-[13px]">
-              No projects yet. Add one above.
+            <div className="p-10 text-center space-y-2">
+              <Icon
+                name="auto_awesome"
+                className="text-primary text-[28px] mx-auto block"
+              />
+              <p className="text-on-surface text-sm">
+                Projects appear here when Claude Code sees them.
+              </p>
+              <p className="text-on-surface-variant/70 text-[12px] max-w-md mx-auto">
+                Run{" "}
+                <span className="font-mono text-on-surface">
+                  npm run connect-claude-code
+                </span>{" "}
+                once, then open Claude Code in any git repo. The SessionStart
+                hook auto-registers it here.
+              </p>
             </div>
           )}
           {projects.map((p) => (

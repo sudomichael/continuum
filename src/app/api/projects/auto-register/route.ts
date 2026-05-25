@@ -8,10 +8,13 @@
 // Token auth via X-Continuum-Token (same shared secret as /api/ingest).
 
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { prisma } from "@/lib/db";
+import { verifyTokenHeader } from "@/lib/cli-auth";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 const Body = z.object({
   cwd: z.string().min(1),
@@ -63,11 +66,40 @@ function isGitRepo(cwd: string): boolean {
   return existsSync(resolve(cwd, ".git"));
 }
 
+// Material Symbols icon name picked from name + cwd keywords. Falls back to
+// the generic brain icon. Kept intentionally small — the project page lets
+// users override it later.
+function pickIcon(name: string, cwd: string): string {
+  const blob = `${name} ${basename(cwd)}`.toLowerCase();
+  const rules: Array<[RegExp, string]> = [
+    [/\b(api|backend|server)\b/, "api"],
+    [/\b(cli|terminal|shell)\b/, "terminal"],
+    [/\b(web|site|website|frontend|landing|marketing)\b/, "language"],
+    [/\b(app|mobile|ios|android)\b/, "smartphone"],
+    [/\b(extension|chrome|browser|plugin)\b/, "extension"],
+    [/\b(bot|agent|ai|llm)\b/, "smart_toy"],
+    [/\b(data|etl|pipeline|warehouse|analytics)\b/, "analytics"],
+    [/\b(infra|deploy|ops|devops|cloud)\b/, "cloud"],
+    [/\b(docs?|blog|content)\b/, "menu_book"],
+    [/\b(game|games|gaming)\b/, "videogame_asset"],
+    [/\b(design|ui|ux)\b/, "palette"],
+    [/\b(test|tests|qa)\b/, "science"],
+    [/\b(crawl|scrap|scrape)\b/, "travel_explore"],
+  ];
+  for (const [re, icon] of rules) {
+    if (re.test(blob)) return icon;
+  }
+  return "psychology";
+}
+
 export async function POST(req: Request) {
-  const expected = process.env.CONTINUUM_TOKEN;
-  if (expected) {
-    const got = req.headers.get("x-continuum-token");
-    if (got !== expected) {
+  const jar = await cookies();
+  const sessionOk = verifySessionToken(jar.get(SESSION_COOKIE)?.value);
+  if (!sessionOk) {
+    const tokenAuth = await verifyTokenHeader(
+      req.headers.get("x-continuum-token"),
+    );
+    if (!tokenAuth.ok) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }
@@ -107,12 +139,15 @@ export async function POST(req: Request) {
       slug,
       name,
       cwd: parsed.cwd,
-      icon: "psychology",
-      state: "active",
+      icon: pickIcon(name, parsed.cwd),
+      state: "exploring",
     },
   });
   await prisma.brain.create({
-    data: { projectId: created.id, currentFocus: `Just registered from ${parsed.cwd}.` },
+    data: {
+      projectId: created.id,
+      currentFocus: `Auto-registered from ${parsed.cwd}. Brain will populate after the first session ends.`,
+    },
   });
 
   return NextResponse.json({ project: created, created: true });

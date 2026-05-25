@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { prisma } from "@/lib/db";
 import { Icon } from "@/components/icon";
 import { StatusPip } from "@/components/status-pip";
@@ -6,6 +9,7 @@ import { HealthRing } from "@/components/health-ring";
 import { MomentumBars } from "@/components/momentum-bars";
 import { timeAgo } from "@/lib/format";
 import { OnboardingGate } from "@/components/onboarding-gate";
+import { OnboardingProviderForm } from "@/components/onboarding-provider-form";
 import { getSettings, tierUsable } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -17,12 +21,25 @@ export default async function DashboardPage({
 }) {
   const { "skip-onboarding": skip } = await searchParams;
 
-  // Setup gate: if no AI provider is configured, show the onboarding screen
-  // instead of the empty dashboard. The user can ?skip-onboarding=1 to bypass.
+  // Setup gate: persists until an AI provider is configured AND at least
+  // one coding-agent hook is installed on this host. Bypass with
+  // ?skip-onboarding=1.
   if (!skip) {
     const settings = await getSettings();
     const aiReady = tierUsable(settings.smart) || tierUsable(settings.cheap);
-    if (!aiReady) {
+
+    // Per-tool detection. Either being present is enough to advance the gate.
+    // The CLI (`continuum connect`) is what writes these; same paths as the
+    // legacy `npm run connect-*` flow so detection works either way.
+    const claudeInstalled = existsSync(
+      resolve(homedir(), ".claude", "continuum-hook.sh"),
+    );
+    const codexInstalled = existsSync(
+      resolve(homedir(), ".codex", "continuum-codex-hook.sh"),
+    );
+    const anyAgentInstalled = claudeInstalled || codexInstalled;
+
+    if (!aiReady || !anyAgentInstalled) {
       return (
         <OnboardingGate
           steps={[
@@ -33,18 +50,36 @@ export default async function DashboardPage({
                 "Your Postgres connection is working — schema is up to date.",
             },
             {
-              done: false,
-              title: "Add an AI provider key",
-              description:
-                "Continuum needs an Anthropic or OpenAI key (or Ollama / OpenRouter / any OpenAI-compatible endpoint) to actually synthesize your project brain. Without it everything's a canned demo.",
-              cta: { label: "Configure AI provider", href: "/settings" },
+              done: aiReady,
+              title: aiReady
+                ? "AI provider configured"
+                : "Pick an AI provider",
+              description: aiReady
+                ? "Tweak provider, model, or split SMART/CHEAP tiers in /settings anytime."
+                : "Continuum uses an AI provider to synthesize your project brain. Pick one and paste a key — we'll auto-pick sensible default models. You can split or tweak things later in /settings.",
+              inlineForm: aiReady ? undefined : <OnboardingProviderForm />,
             },
             {
-              done: false,
-              title: "Connect Claude Code (optional but the whole point)",
-              description:
-                "Wires Continuum into your Claude Code sessions so every transcript becomes a brain update. Run this in your terminal from the Continuum repo:",
-              code: "npm run connect-claude-code",
+              done: anyAgentInstalled,
+              title: anyAgentInstalled
+                ? `Coding agent connected${
+                    claudeInstalled && codexInstalled
+                      ? " (Claude Code + Codex)"
+                      : claudeInstalled
+                        ? " (Claude Code)"
+                        : " (Codex)"
+                  }`
+                : "Install the Continuum CLI",
+              description: anyAgentInstalled
+                ? "Sessions in any git repo become brain updates automatically. You can install the other agent's hook anytime."
+                : "One command installs the CLI, browser-pairs this machine, and wires up hooks for every coding agent it finds on your machine.",
+              code: anyAgentInstalled
+                ? undefined
+                : `curl -fsSL https://get.getcontinuum.dev/install.sh | sh
+continuum connect`,
+              footnote: anyAgentInstalled
+                ? undefined
+                : "Using something else (Cursor, Aider, Cline, Gemini CLI, …)? Any tool that can run a shell command on session end can POST transcripts to /api/ingest — see the README.",
             },
           ]}
         />
@@ -92,23 +127,23 @@ export default async function DashboardPage({
       {projects.length === 0 ? (
         <div className="border border-outline-variant rounded-lg bg-surface-container-low p-10 text-center">
           <Icon
-            name="psychology"
+            name="auto_awesome"
             className="text-primary text-[32px] mx-auto block mb-4"
           />
           <h2 className="font-display text-xl text-on-surface mb-2">
-            No projects yet
+            Open Claude Code in a git repo
           </h2>
           <p className="text-on-surface-variant text-sm max-w-md mx-auto mb-4">
-            Open Claude Code in a git repo (auto-registers via the SessionStart
-            hook), or add one manually.
+            The SessionStart hook auto-registers any repo here. SessionEnd
+            ingests the transcript and synthesizes the brain. No forms.
           </p>
-          <Link
-            href="/projects"
-            className="inline-flex items-center gap-2 bg-primary text-on-primary label-caps py-2 px-4 rounded hover:opacity-90"
-          >
-            Add a project
-            <Icon name="arrow_forward" className="text-[16px]" />
-          </Link>
+          <p className="text-on-surface-variant/60 text-xs max-w-md mx-auto">
+            Haven&apos;t installed the hook yet? Run this in the Continuum
+            repo:
+          </p>
+          <pre className="inline-block mt-2 bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-[12px]">
+            npm run connect-claude-code
+          </pre>
         </div>
       ) : (
         <div className="border border-outline-variant rounded-lg bg-surface-container-lowest overflow-hidden">

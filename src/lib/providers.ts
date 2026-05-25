@@ -45,10 +45,13 @@ export const PROVIDERS: Record<ProviderId, ProviderPreset> = {
     id: "ollama",
     label: "Ollama (local)",
     baseUrl: "http://localhost:11434/v1",
-    defaultSmartModel: "llama3.3:70b",
+    // Conservative defaults that run on a typical laptop (~4GB RAM for 3b).
+    // Heavier models like llama3.3:70b are great but need ~40GB RAM.
+    defaultSmartModel: "llama3.2:3b",
     defaultCheapModel: "llama3.2:3b",
     requiresKey: false,
-    notes: "Run models locally. No API cost. Slower; quality varies by model.",
+    notes:
+      "Run models locally. Free. Quality is lower than cloud models, especially for brain synthesis — bump SMART to a bigger model (llama3.3:70b, etc.) if you have the RAM.",
   },
   openrouter: {
     id: "openrouter",

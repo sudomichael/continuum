@@ -3,6 +3,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { complete } from "@/lib/ai";
 import { synthesizeBrain } from "@/lib/synthesis";
+import { verifyTokenHeader } from "@/lib/cli-auth";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 const Body = z.object({
   cwd: z.string().optional(),
@@ -50,11 +53,15 @@ function tryParse(raw: string): SessionSummary | null {
 }
 
 export async function POST(req: Request) {
-  // Token auth (shared secret between Claude Code hook and server).
-  const expected = process.env.CONTINUUM_TOKEN;
-  if (expected) {
-    const got = req.headers.get("x-continuum-token");
-    if (got !== expected) {
+  // Auth: accept (a) a valid session cookie (web UI), (b) the legacy shared
+  // secret in CONTINUUM_TOKEN, or (c) a per-device CLI token.
+  const jar = await cookies();
+  const sessionOk = verifySessionToken(jar.get(SESSION_COOKIE)?.value);
+  if (!sessionOk) {
+    const tokenAuth = await verifyTokenHeader(
+      req.headers.get("x-continuum-token"),
+    );
+    if (!tokenAuth.ok) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }

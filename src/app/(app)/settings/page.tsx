@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { getSettings } from "@/lib/settings";
 import { PROVIDERS } from "@/lib/providers";
+import { prisma } from "@/lib/db";
 import { SettingsForm } from "./settings-form";
+import { CliDevicesList } from "./cli-devices-list";
 import {
   DEFAULT_ADMIN_PASSWORD,
   checkPassword,
@@ -35,6 +37,16 @@ export default async function SettingsPage({
   searchParams: Promise<{ pwError?: string; pwOk?: string }>;
 }) {
   const s = await getSettings();
+  const cliDevices = await prisma.cliToken.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      platform: true,
+      createdAt: true,
+      lastSeenAt: true,
+    },
+  });
   const { pwError, pwOk } = await searchParams;
   const usingDefault = await checkPassword(DEFAULT_ADMIN_PASSWORD);
   const pwMessage =
@@ -148,24 +160,24 @@ export default async function SettingsPage({
       </section>
 
       <section className="border border-outline-variant rounded-lg bg-surface-container-low p-4">
-        <h2 className="label-caps text-primary mb-2">CLAUDE_CODE_INTEGRATION</h2>
-        <p className="text-[13px] text-on-surface-variant mb-2">
-          Continuum wires into Claude Code so every session in a git repo
-          auto-registers as a project and its transcript becomes a brain update
-          on session end. Plus an MCP server gives Claude tools to talk to
-          Continuum mid-session.
+        <h2 className="label-caps text-primary mb-2">CONNECTED_DEVICES</h2>
+        <p className="text-[13px] text-on-surface-variant mb-4">
+          Machines that have paired with this Continuum via{" "}
+          <span className="font-mono">continuum connect</span>. Each gets a
+          revocable token. Run{" "}
+          <span className="font-mono">continuum connect</span> on a new
+          machine to add it; revoke from here to kill it.
         </p>
-        <p className="text-[13px] text-on-surface-variant mb-2">
-          From the repo root, run:
-        </p>
-        <pre className="bg-surface-container-lowest border border-outline-variant rounded p-2 font-mono text-[12px] overflow-x-auto whitespace-pre">
-{`npm run connect-claude-code`}
-        </pre>
-        <p className="text-[12px] text-on-surface-variant/60 mt-2">
-          Patches <span className="font-mono">~/.claude/settings.json</span>{" "}
-          in place (with a backup). Restart Claude Code so it picks up the new
-          hooks + MCP server. Idempotent — safe to re-run.
-        </p>
+        <CliDevicesList devices={cliDevices} />
+        <div className="mt-4 rounded border border-outline-variant bg-surface-container-lowest p-2">
+          <div className="label-caps text-on-surface-variant mb-1">
+            INSTALL ON A NEW MACHINE
+          </div>
+          <pre className="font-mono text-[12px] overflow-x-auto whitespace-pre">
+{`curl -fsSL https://get.getcontinuum.dev/install.sh | sh
+continuum connect`}
+          </pre>
+        </div>
       </section>
     </div>
   );

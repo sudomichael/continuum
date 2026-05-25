@@ -1,7 +1,7 @@
 // `npm run install-hook`
 //
 // Installs the Continuum SessionEnd hook for Claude Code in one command:
-//   - copies apps/cli/continuum-hook.sh to ~/.claude/continuum-hook.sh
+//   - copies cli/embedded/hooks/continuum-hook.sh to ~/.claude/continuum-hook.sh
 //   - patches ~/.claude/settings.json with the hook entry + env vars
 //
 // Idempotent: re-running updates the script and leaves the settings entry
@@ -23,8 +23,8 @@ import { stdin as input, stdout as output } from "node:process";
 import { ensureContinuumUrl } from "./lib/installer-env";
 
 const ROOT = resolve(__dirname, "..");
-const HOOK_SOURCE = resolve(ROOT, "apps/cli/continuum-hook.sh");
-const START_HOOK_SOURCE = resolve(ROOT, "apps/cli/continuum-session-start.sh");
+const HOOK_SOURCE = resolve(ROOT, "cli/embedded/hooks/continuum-hook.sh");
+const START_HOOK_SOURCE = resolve(ROOT, "cli/embedded/hooks/continuum-session-start.sh");
 const CLAUDE_DIR = resolve(homedir(), ".claude");
 const HOOK_DEST = resolve(CLAUDE_DIR, "continuum-hook.sh");
 const START_HOOK_DEST = resolve(CLAUDE_DIR, "continuum-session-start.sh");
