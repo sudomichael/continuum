@@ -18,3 +18,6 @@ var ClaudeSessionStartHook []byte
 
 //go:embed hooks/continuum-codex-hook.sh
 var CodexStopHook []byte
+
+//go:embed mcp/continuum-mcp.ts
+var ClaudeMCPServer []byte

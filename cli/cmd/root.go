@@ -24,6 +24,7 @@ Typical first run:
 	}
 	root.AddCommand(connectCmd())
 	root.AddCommand(statusCmd())
+	root.AddCommand(doctorCmd())
 	root.AddCommand(disconnectCmd())
 	root.AddCommand(versionCmd())
 	return root

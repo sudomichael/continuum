@@ -19,6 +19,7 @@ type ClaudeResult struct {
 	HookPath         string
 	SessionStartPath string
 	SettingsPath     string
+	MCPScriptPath    string // empty if MCP install was skipped
 	BackupCreated    bool
 }
 
@@ -38,6 +39,17 @@ func Claude(claudeDir, continuumURL, continuumToken string) (ClaudeResult, error
 		return ClaudeResult{}, fmt.Errorf("write %s: %w", startPath, err)
 	}
 
+	// Drop the MCP server script into ~/.continuum/mcp/ so Claude Code can
+	// run it via `npx tsx <path>`. We don't ship a Node runtime ourselves —
+	// devs using Claude Code already have Node — but we own the script so
+	// it stays in sync with the server.
+	mcpPath, err := writeMCPScript()
+	if err != nil {
+		// Non-fatal: hooks still work without MCP. Print a softer warning
+		// upstream (the caller decides whether to surface).
+		mcpPath = ""
+	}
+
 	settings, err := readJSON(settingsPath)
 	if err != nil {
 		return ClaudeResult{}, err
@@ -51,6 +63,9 @@ func Claude(claudeDir, continuumURL, continuumToken string) (ClaudeResult, error
 	addClaudeHookEntry(settings, "SessionStart", "~/.claude/continuum-session-start.sh")
 	setEnv(settings, "CONTINUUM_URL", continuumURL)
 	setEnv(settings, "CONTINUUM_TOKEN", continuumToken)
+	if mcpPath != "" {
+		registerMCPServer(settings, mcpPath, continuumURL, continuumToken)
+	}
 
 	if err := writeJSON(settingsPath, settings); err != nil {
 		return ClaudeResult{}, err
@@ -59,8 +74,47 @@ func Claude(claudeDir, continuumURL, continuumToken string) (ClaudeResult, error
 		HookPath:         hookPath,
 		SessionStartPath: startPath,
 		SettingsPath:     settingsPath,
+		MCPScriptPath:    mcpPath,
 		BackupCreated:    backupCreated,
 	}, nil
+}
+
+// writeMCPScript drops the MCP TS source into ~/.continuum/mcp/. Returns
+// the path so the settings.json patch can reference it.
+func writeMCPScript() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".continuum", "mcp")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "continuum-mcp.ts")
+	if err := os.WriteFile(path, embedded.ClaudeMCPServer, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// registerMCPServer adds (or updates) a "continuum" entry in
+// settings.mcpServers — same shape Claude Code's MCP system expects.
+// Uses `npx tsx` so the user doesn't need a separate runtime install.
+func registerMCPServer(settings map[string]any, scriptPath, url, token string) {
+	servers, _ := settings["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+		settings["mcpServers"] = servers
+	}
+	servers["continuum"] = map[string]any{
+		"type":    "stdio",
+		"command": "npx",
+		"args":    []any{"-y", "tsx", scriptPath},
+		"env": map[string]any{
+			"CONTINUUM_URL":   url,
+			"CONTINUUM_TOKEN": token,
+		},
+	}
 }
 
 // addClaudeHookEntry mirrors the TS install-hook.ts: settings.hooks[event]

@@ -24,6 +24,7 @@ import (
 	"github.com/sudomichael/continuum/cli/internal/discover"
 	"github.com/sudomichael/continuum/cli/internal/install"
 	"github.com/sudomichael/continuum/cli/internal/pair"
+	"github.com/sudomichael/continuum/cli/internal/telemetry"
 )
 
 func connectCmd() *cobra.Command {
@@ -126,6 +127,11 @@ func runConnect(urlFlag string, yes bool) error {
 				filepath.Base(res.HookPath),
 				filepath.Base(res.SessionStartPath),
 			)
+			if res.MCPScriptPath != "" {
+				fmt.Printf("  + MCP server registered (continuum_register_project, continuum_capture, …)\n")
+			} else {
+				fmt.Printf("  ! MCP server skipped — Claude Code won't get the continuum_* tools this run\n")
+			}
 			if res.BackupCreated {
 				fmt.Printf("  backed up your settings.json (one-time)\n")
 			}
@@ -143,6 +149,7 @@ func runConnect(urlFlag string, yes bool) error {
 
 	fmt.Println()
 	fmt.Println("All set. Restart any open Claude Code / Codex sessions so they pick up the new hooks.")
+	telemetry.Event("connect", Version)
 	return nil
 }
 

@@ -1,144 +1,153 @@
+<div align="center">
+
 # Continuum
 
-A **living project brain** for founders running many AI-assisted projects at once.
+**A living project brain for founders running many AI-assisted projects.**
 
-Continuum synthesizes a tight operational document for each project — what it is, where it stands, what's blocking, what's next — from your Claude Code sessions, manual notes, and decisions. Stop work for three weeks, come back, regain full context in under 30 seconds.
+[![Release](https://img.shields.io/github/v/release/sudomichael/continuum?label=release&color=4b8eff)](https://github.com/sudomichael/continuum/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/sudomichael/continuum/release.yml?label=release%20build)](https://github.com/sudomichael/continuum/actions)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-green.svg)](./LICENSE)
+[![Discussions](https://img.shields.io/github/discussions/sudomichael/continuum?color=adc6ff)](https://github.com/sudomichael/continuum/discussions)
 
-> AI coding sessions act like isolated managers. Continuum is the executive layer above them.
+[**getcontinuum.dev**](https://getcontinuum.dev) · [Install](#install) · [How it works](#how-it-works) · [Self-host](#self-hosting) · [Contributing](./CONTRIBUTING.md)
+
+</div>
 
 ---
 
-## Installing from source
+Continuum continuously synthesizes a tight operational document for each of your AI-assisted projects — what it is, where it stands, what's blocking, what's next — from your **Claude Code** and **Codex** sessions, manual captures, and decisions. Stop work for three weeks, come back, regain full context in under 30 seconds.
 
-Requirements: Node 20+, a Postgres database (any host — Neon, Supabase, RDS, a local install, or the `docker compose` option below).
+> AI coding sessions act like isolated managers. Continuum is the executive layer above them.
 
-```bash
-git clone <this-repo> continuum
-cd continuum
-npm install
-```
+## Install
 
-Create a `.env` with your database connection string:
-
-```
-DATABASE_URL=postgresql://username:password@localhost:5432/continuum
-```
-
-Then build and start:
-
-```bash
-npm run build
-npm start
-```
-
-Open <http://localhost:3000>. The build step creates tables in your database if you're installing for the first time (so `DATABASE_URL` must be reachable during `npm run build`). It will also create a login user with password **`continuum`** — change it in `/settings` after signing in.
-
-Without an API key, Continuum runs in **demo mode** with a canned AI provider so you can poke around the UI. To unlock real synthesis, visit `/settings` and paste an Anthropic or OpenAI key. Keys are encrypted at rest (`AES-256-GCM`).
-
-## Running Postgres with Docker
-
-If you don't want to bring your own Postgres, the repo ships a `docker-compose.yml` with a local Postgres service. From the repo root:
-
-```bash
-docker compose up -d
-```
-
-Then set `DATABASE_URL=postgresql://continuum:continuum@localhost:5432/continuum` in `.env` and follow the source install above.
-
-## Connect your coding agent
-
-The headline feature: every coding session in a git repo auto-registers as a project, its transcript gets summarized on session end, and that project's brain re-synthesizes.
-
-**One command, on any machine:**
+**On your dev machine** (one line, after you've stood up a Continuum server):
 
 ```bash
 curl -fsSL https://get.getcontinuum.dev/install.sh | sh
-continuum connect
 ```
 
-That:
+That downloads the `continuum` CLI, verifies its SHA256, drops it into `~/.continuum/bin/`, wires your shell, and drops you straight into `continuum connect` — the browser-pairing flow that authorizes this machine and installs hooks into every coding agent it finds (Claude Code, Codex CLI).
 
-1. Downloads the `continuum` binary into `~/.continuum/bin/` and adds it to your PATH.
-2. Opens your browser so you can authorize this machine against your Continuum server.
-3. Auto-detects every supported coding agent on your machine and offers to install hooks for each (Claude Code, OpenAI Codex CLI, more coming).
+Alternate install paths:
 
-Restart any open agent sessions so they pick up the new hooks. Re-run anytime — `continuum connect` is idempotent. Manage paired devices in **Settings → Connected Devices**.
+- **Homebrew** (macOS / Linux): `brew install sudomichael/tap/continuum`
+- **Go**: `go install github.com/sudomichael/continuum/cli@latest`
+- **Binary download**: grab a release from [the releases page](https://github.com/sudomichael/continuum/releases)
 
-> **Already cloned this repo for hacking?** You can also run `npm run connect-claude-code` / `npm run connect-codex` from the repo root — same effect, no CLI install needed.
+To install Continuum the **server**, see [Self-hosting](#self-hosting).
 
-### Codex CLI caveat
+## How it works
 
-Codex doesn't yet expose a true `SessionEnd` event ([openai/codex#20603](https://github.com/openai/codex/issues/20603)) so the installer registers against `Stop` (fires per-turn). The server dedupes by `session_id`, so the project brain stays current as the session grows instead of stacking duplicate session rows. When upstream ships `SessionEnd`, swap the event name in `~/.codex/hooks.json` — no other change needed.
+```
+┌──────────────┐       SessionEnd / Stop hook       ┌─────────────────┐
+│ Claude Code  │ ─────── transcript via POST ─────▶ │   Continuum     │
+│ Codex CLI    │                                    │   (your server) │
+│ (any agent)  │ ◀─── tools via MCP server ─────── │                 │
+└──────────────┘                                    └────────┬────────┘
+                                                             │
+                                                             ▼
+                                                   ┌─────────────────┐
+                                                   │ Brain synthesis │
+                                                   │ (SMART + CHEAP  │
+                                                   │  AI tiers)      │
+                                                   └─────────────────┘
+```
 
-## Connect any other coding agent
+1. **Hooks fire automatically** on session events. SessionStart auto-registers any git repo as a project. SessionEnd / Stop POSTs the transcript to your Continuum server.
+2. **Continuum summarizes** the session via a cheap model and **synthesizes a brain doc** via a smart model: what changed, decisions made, blockers, next actions.
+3. **The dashboard surfaces it** — one row per project showing state, focus, momentum, blockers. Open a project to see its full brain, threads, decisions, and timeline.
+4. **MCP tools** give agents a way to talk back: *"register this with continuum,"* *"what's blocking parcelwise?"* etc.
 
-Anything that can run a shell command at session end can feed Continuum. POST the transcript to `/api/ingest`:
+## Surfaces
+
+| Path | What |
+| --- | --- |
+| `/` | Executive dashboard — one row per project |
+| `/projects/[slug]` | Project Brain — synthesized sections + threads + decisions + recent updates |
+| `/timeline` | Chronological operational memory stream |
+| `/settings` | AI provider, password, connected CLI devices |
+| `CMD+K` | Quick Capture — paste a thought; AI classifies + re-synthesizes |
+
+## AI provider flexibility
+
+Two model tiers, each independently configurable:
+
+- **SMART** — brain synthesis (low volume, strategic)
+- **CHEAP** — session summarization + capture classification (high volume)
+
+Built-in presets:
+
+| Provider | Notes |
+| --- | --- |
+| Anthropic (Claude) | Native SDK, top quality |
+| OpenAI (GPT) | |
+| **Ollama** | Local, free OSS models. $0/mo. |
+| **OpenRouter** | One key, 100+ models including OSS |
+| Custom | Any OpenAI-compatible endpoint (vLLM, llama-cpp-server, LM Studio, Groq, Together, DeepSeek, …) |
+
+Configure in `/settings`. Mix-and-match freely — e.g. Anthropic SMART + Ollama CHEAP keeps quality up where it matters and costs near zero where it doesn't.
+
+## Self-hosting
+
+Continuum the **server** is a Next.js app + Postgres. Three install options, in order of effort:
+
+### Option A — Docker Compose (recommended)
+
+```bash
+git clone https://github.com/sudomichael/continuum
+cd continuum
+docker compose up -d           # spins up Postgres
+cp .env.example .env
+# Edit .env — paste the docker postgres URL or a Neon URL
+npm install
+npm run build && npm start
+```
+
+### Option B — Build from source against your own Postgres
+
+Same as A but skip `docker compose up`. Point `DATABASE_URL` at whatever Postgres you've already got — [Neon](https://neon.tech) free tier is the lowest-effort path.
+
+### Option C — Deploy to Vercel / Render / Railway (coming soon)
+
+One-click deploy buttons land in the next release. Until then, the source install above works on any Node host.
+
+After `npm start`, open `http://localhost:3000` and log in with password **`continuum`** (change it immediately at `/settings`). Then install the CLI on every machine where you use Claude Code / Codex — they all point at the same Continuum.
+
+## Bring your own agent
+
+Continuum officially supports Claude Code and Codex CLI hooks. **Anything else** that can run a shell command at session end can plug in via the universal ingest endpoint:
 
 ```bash
 curl -X POST "$CONTINUUM_URL/api/ingest" \
   -H "Content-Type: application/json" \
   -H "X-Continuum-Token: $CONTINUUM_TOKEN" \
-  -d @- <<EOF
-{
-  "cwd": "$(pwd)",
-  "source": "claude_code",
-  "sessionId": "<stable session id, optional but recommended>",
-  "transcript": "$(cat path/to/transcript)"
-}
-EOF
+  -d '{ "cwd": "'"$(pwd)"'", "source": "custom", "sessionId": "...", "transcript": "..." }'
 ```
 
-If `sessionId` is included, Continuum dedupes per-session — handy for tools that fire mid-session (e.g. Codex's `Stop` event). The first matching `cwd` resolves to a registered project; if no project is bound to that `cwd`, hit `/api/projects/auto-register` first.
+If `sessionId` is included, Continuum dedupes per-session so per-turn hooks work too. Works with Cursor, Aider, Cline, Gemini CLI, custom shell wrappers.
 
-Works with Cursor, Aider, Cline, Gemini CLI, Aider, custom shell wrappers — anything with a session-end hook or a way to grab the transcript.
+## Privacy + telemetry
 
-## AI provider flexibility
-
-Continuum uses two model tiers, each independently configurable:
-
-- **SMART** — brain synthesis (low volume, strategic)
-- **CHEAP** — session summarization + capture classification (high volume, easier)
-
-Each tier has its own provider, base URL, model, and API key. Mix-and-match freely — e.g. Anthropic for SMART, Ollama for CHEAP.
-
-**Built-in presets:**
-- Anthropic (Claude) — native SDK, top quality
-- OpenAI (GPT)
-- **Ollama** — local, free, OSS models. Zero API cost.
-- **OpenRouter** — one key, 100+ models including OSS
-- **Custom** — any OpenAI-compatible endpoint (vLLM, llama-cpp-server, LM Studio, Groq, Together, DeepSeek, …)
-
-**Cost** depends on what you pick:
-- Both tiers Anthropic: ~$30–60/month at heavy usage
-- Both tiers Ollama (local): **$0**
-- Anthropic SMART + Ollama CHEAP: ~$5–10/month
-- OpenRouter on cheaper OSS models: ~$2–10/month
-
-Configure in `/settings`. Hit `TEST_CONNECTION` on each tier to verify before saving.
-
-## Surfaces
-
-| Path | What it does |
-| --- | --- |
-| `/` | Executive dashboard — one row per project: state, focus, blockers, momentum, health |
-| `/projects/[slug]` | Project Brain — synthesized sections + threads + decisions + recent updates |
-| `/timeline` | Chronological operational memory stream, filterable |
-| `/settings` | API keys, provider, model selection, password |
-| `CMD+K` anywhere | Quick Capture — paste a thought; AI classifies + re-synthesizes |
+Continuum does **not** collect telemetry by default. The CLI can ping an aggregate-count endpoint when explicitly opted in (`CONTINUUM_TELEMETRY=1`); without that env var, no network calls beyond your own Continuum server are ever made. Your transcripts go only to *your* server and *your* AI provider.
 
 ## Env vars
 
-| Var | Required | What it's for |
-| --- | --- | --- |
-| `DATABASE_URL` | yes | Postgres connection string. |
-| `ENCRYPTION_KEY` | yes | 32-byte hex (`openssl rand -hex 32`). Encrypts API keys at rest. Auto-generated on first `npm run build` if missing. |
-| `CONTINUUM_TOKEN` | yes | 24-byte hex (`openssl rand -hex 24`). Shared secret Claude Code / Codex hooks send in `X-Continuum-Token`. Auto-generated on first `npm run build` if missing. |
-| `CONTINUUM_URL` | no | Where Continuum is reachable. Used by the installer to wire up Claude Code; defaults to `http://localhost:3000`. |
-| `CONTINUUM_PASSWORD_HASH` | no | Pre-seed the web login password as a scrypt hash. In-DB value (set via `/settings`) takes precedence. |
-| `ANTHROPIC_API_KEY` | no | Fallback if `/settings` is empty for the Anthropic provider. |
-| `OPENAI_API_KEY` | no | Same idea for OpenAI. |
-| `DEMO_MODE` | no | Set to `1` to use the canned mock AI provider (no real keys needed). |
+See [.env.example](./.env.example). Headlines:
+
+| Var | What |
+| --- | --- |
+| `DATABASE_URL` | Postgres connection string (required) |
+| `ENCRYPTION_KEY` | 32-byte hex; auto-generated on first run. Encrypts AI provider keys at rest. |
+| `CONTINUUM_TOKEN` | Legacy shared secret for hooks. New installs should use per-device CLI tokens (browser pairing). |
+| `CONTINUUM_PASSWORD_HASH` | Optional pre-seeded scrypt hash for stateless deploys. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallbacks if `/settings` is empty for that provider. |
+| `DEMO_MODE=1` | Run with a canned mock provider (no real AI calls). |
 
 ## License
 
-[AGPL-3.0](./LICENSE). Self-hosting is free forever. If you modify Continuum and run it as a service for others, your changes must be released under the same license.
+[AGPL-3.0](./LICENSE). Self-hosting is free forever. If you modify Continuum and run it as a service for others, your changes must be released under the same license. A managed hosted version is planned — same codebase, paid features gated behind env flags.
+
+## Contributing
+
+[CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines. Security reports: [SECURITY.md](./SECURITY.md).

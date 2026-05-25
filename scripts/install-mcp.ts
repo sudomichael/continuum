@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 import { ensureContinuumUrl } from "./lib/installer-env";
 
 const ROOT = resolve(__dirname, "..");
-const MCP_SCRIPT = resolve(ROOT, "apps/cli/continuum-mcp.ts");
+const MCP_SCRIPT = resolve(ROOT, "cli/embedded/mcp/continuum-mcp.ts");
 const SETTINGS_PATH = resolve(homedir(), ".claude", "settings.json");
 const ENV_PATH = resolve(ROOT, ".env");
 

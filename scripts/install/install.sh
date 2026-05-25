@@ -5,8 +5,16 @@
 #   curl -fsSL https://get.getcontinuum.dev/install.sh | sh
 #
 # Downloads the right continuum binary for your OS/arch from GitHub Releases,
-# drops it in ~/.continuum/bin/, and adds that dir to your PATH (zsh/bash/fish).
-# Idempotent: re-running upgrades to the latest release.
+# verifies its SHA256 against the SHA256SUMS manifest from the same release,
+# drops it in ~/.continuum/bin/, and (unless told not to) launches
+# `continuum connect` to pair this machine.
+#
+# Env overrides:
+#   CONTINUUM_REPO=org/repo         (default sudomichael/continuum)
+#   CONTINUUM_VERSION=v0.1.2        (default: latest)
+#   CONTINUUM_INSTALL_DIR=/path     (default: ~/.continuum/bin)
+#   CONTINUUM_SKIP_CONNECT=1        Skip the auto-launched `continuum connect`
+#   CONTINUUM_SKIP_VERIFY=1         Skip SHA256 verification (NOT recommended)
 
 set -eu
 
@@ -60,27 +68,65 @@ else
 fi
 
 URL="https://github.com/${REPO}/releases/download/${TAG}/${BINARY}"
+SUMS_URL="https://github.com/${REPO}/releases/download/${TAG}/SHA256SUMS"
 
-# --- Download ---------------------------------------------------------------
+# --- Download + verify ------------------------------------------------------
 
 mkdir -p "$INSTALL_DIR"
 DEST="${INSTALL_DIR}/continuum${EXT}"
+TMP_BIN="${DEST}.tmp"
+TMP_SUMS="${INSTALL_DIR}/.SHA256SUMS.tmp"
+
+cleanup() { rm -f "$TMP_BIN" "$TMP_SUMS"; }
+trap cleanup EXIT
 
 printf "Downloading %s … " "$BINARY"
-if ! curl -fsSL "$URL" -o "$DEST.tmp"; then
+if ! curl -fsSL "$URL" -o "$TMP_BIN"; then
   echo "failed."
   echo "Could not download $URL — does that release/asset exist?" >&2
-  rm -f "$DEST.tmp"
   exit 1
 fi
-chmod +x "$DEST.tmp"
-mv "$DEST.tmp" "$DEST"
 echo "done."
+
+# Verify checksum unless explicitly skipped. The SHA256SUMS manifest is
+# published alongside the binaries in the same Release.
+if [ -z "${CONTINUUM_SKIP_VERIFY:-}" ]; then
+  printf "Verifying SHA256 … "
+  if ! curl -fsSL "$SUMS_URL" -o "$TMP_SUMS"; then
+    echo "skipped (SHA256SUMS not found — older release without checksums)"
+  else
+    expected="$(grep " ${BINARY}\$" "$TMP_SUMS" | awk '{print $1}')"
+    if [ -z "$expected" ]; then
+      echo "FAILED — no entry for ${BINARY} in SHA256SUMS" >&2
+      exit 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual="$(sha256sum "$TMP_BIN" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+      actual="$(shasum -a 256 "$TMP_BIN" | awk '{print $1}')"
+    else
+      echo "skipped (no sha256sum/shasum tool found)"
+      actual="$expected"
+    fi
+    if [ "$actual" != "$expected" ]; then
+      echo "FAILED"
+      echo "  expected: $expected" >&2
+      echo "  actual:   $actual"   >&2
+      echo "Refusing to install a tampered binary." >&2
+      exit 1
+    fi
+    echo "ok."
+  fi
+fi
+
+chmod +x "$TMP_BIN"
+mv "$TMP_BIN" "$DEST"
+trap - EXIT
+rm -f "$TMP_SUMS"
 
 # --- Wire up PATH -----------------------------------------------------------
 
 needs_path_line() {
-  # Look for our exact line, robust to shell rc whitespace.
   ! grep -qsF "$INSTALL_DIR" "$1" 2>/dev/null
 }
 
@@ -120,12 +166,38 @@ case "$(basename "${SHELL:-}")" in
     ;;
 esac
 
-cat <<EOF
+# Make sure the binary is callable in THIS shell, so the trailing
+# `continuum connect` and any user retries Just Work without restarting.
+export PATH="$PATH:${INSTALL_DIR}"
 
-Continuum CLI installed: $DEST ($TAG)
+echo ""
+echo "✓ Continuum CLI installed: $DEST ($TAG)"
+echo ""
 
-Next:
-  - Open a new terminal (so PATH picks up), or run:  export PATH="\$PATH:$INSTALL_DIR"
-  - Then:                                            continuum connect
+# --- Chain into pairing -----------------------------------------------------
+#
+# When run from `curl | sh` interactively, drop straight into pairing. The
+# user just wanted the tool working — making them remember a second command
+# is friction. Skip when stdin isn't a TTY (CI / Docker), or when explicitly
+# disabled.
 
-EOF
+if [ -n "${CONTINUUM_SKIP_CONNECT:-}" ]; then
+  echo "Skipping \`continuum connect\` (CONTINUUM_SKIP_CONNECT set)."
+  echo "Run it manually when you're ready:"
+  echo "    continuum connect"
+  exit 0
+fi
+
+# stdin from `curl | sh` is a pipe, not a TTY — so we re-open /dev/tty for
+# the connect step's prompts. If /dev/tty isn't available either (CI), bail
+# cleanly with instructions.
+if [ ! -r /dev/tty ]; then
+  echo "Non-interactive shell — finishing without pairing."
+  echo "Run this from your terminal to pair this machine:"
+  echo "    continuum connect"
+  exit 0
+fi
+
+echo "Launching \`continuum connect\` …"
+echo ""
+exec "$DEST" connect </dev/tty

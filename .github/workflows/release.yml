@@ -1,13 +1,20 @@
 # Builds the Continuum CLI for 5 OS/arch targets on every tag push (v*),
-# uploads each binary to the GitHub Release. The install.sh script consumes
-# these as `continuum-<os>-<arch>[.exe]`.
+# uploads each binary + a SHA256SUMS manifest to the GitHub Release.
 #
 # To cut a release:
 #   git tag v0.1.0
 #   git push origin v0.1.0
 #
-# That fires this workflow. It auto-creates a Release for the tag if one
-# doesn't exist yet (softprops/action-gh-release).
+# Outputs in the release:
+#   continuum-darwin-arm64
+#   continuum-darwin-amd64
+#   continuum-linux-arm64
+#   continuum-linux-amd64
+#   continuum-windows-amd64.exe
+#   SHA256SUMS              ← verified by install.sh before exec
+#
+# We also publish the Homebrew formula update on the same trigger — see
+# homebrew.yml in this dir.
 
 name: release
 
@@ -70,9 +77,40 @@ jobs:
             -o ../dist/continuum-${{ matrix.target }}${{ matrix.ext }} \
             .
 
-      - name: Upload to release
+      - name: Upload artifact (intermediate)
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: dist/continuum-${{ matrix.target }}${{ matrix.ext }}
+          retention-days: 1
+
+  # One release job aggregates the matrix outputs, computes a single
+  # SHA256SUMS manifest, and uploads everything as one Release. This is the
+  # pattern goreleaser uses; install.sh fetches SHA256SUMS first and
+  # verifies the binary against it before chmod+x.
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: bin-*
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          ls -la
+          sha256sum continuum-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/continuum-${{ matrix.target }}${{ matrix.ext }}
+          files: |
+            dist/continuum-*
+            dist/SHA256SUMS
           fail_on_unmatched_files: true
           generate_release_notes: true

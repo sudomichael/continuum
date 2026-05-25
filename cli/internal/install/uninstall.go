@@ -9,6 +9,16 @@ import (
 	"path/filepath"
 )
 
+// MCPScriptDir is where `continuum connect` drops the MCP TS source so
+// Claude Code can spawn it via `npx tsx`. Exposed for both install + uninstall.
+func MCPScriptDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".continuum", "mcp"), nil
+}
+
 type UninstallResult struct {
 	Removed []string
 	Skipped []string
@@ -41,6 +51,21 @@ func Uninstall(claudeDir, codexDir string) (UninstallResult, error) {
 	); err != nil {
 		if firstErr == nil {
 			firstErr = err
+		}
+	}
+	// Also remove the MCP server entry (lives in mcpServers, not hooks).
+	if err := removeMCPServerEntry(
+		filepath.Join(claudeDir, "settings.json"),
+		"continuum",
+	); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if mcpDir, err := MCPScriptDir(); err == nil {
+		mcpScript := filepath.Join(mcpDir, "continuum-mcp.ts")
+		if removed, _ := tryRemove(mcpScript); removed {
+			res.Removed = append(res.Removed, mcpScript)
 		}
 	}
 
@@ -124,6 +149,32 @@ func stripFromJSON(path string, commands []string, envKeys []string) error {
 		}
 	}
 
+	return writeJSON(path, cfg)
+}
+
+// removeMCPServerEntry drops a named entry from settings.mcpServers and
+// the whole mcpServers key if it becomes empty.
+func removeMCPServerEntry(path, name string) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	cfg, err := readJSON(path)
+	if err != nil {
+		return err
+	}
+	servers, _ := cfg["mcpServers"].(map[string]any)
+	if servers == nil {
+		return nil
+	}
+	if _, ok := servers[name]; !ok {
+		return nil
+	}
+	delete(servers, name)
+	if len(servers) == 0 {
+		delete(cfg, "mcpServers")
+	} else {
+		cfg["mcpServers"] = servers
+	}
 	return writeJSON(path, cfg)
 }
 
