@@ -151,6 +151,17 @@ async function seedAdminPassword() {
 }
 
 async function main() {
+  // Docker builds run `next build` without a reachable DB. The image's
+  // runtime entrypoint runs the real bootstrap when the container actually
+  // starts. CONTINUUM_BUILD_ONLY=1 lets us skip everything DB-touching at
+  // build time without ripping bootstrap out of the build script.
+  if (
+    process.env.CONTINUUM_BUILD_ONLY === "1" ||
+    process.env.CONTINUUM_SKIP_BOOTSTRAP === "1"
+  ) {
+    log("CONTINUUM_BUILD_ONLY/SKIP_BOOTSTRAP set — skipping env/schema/seed");
+    return;
+  }
   ensureEnvFile();
   validateDatabaseUrl();
   ensureSchema();

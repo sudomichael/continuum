@@ -108,9 +108,31 @@ npm run build && npm start
 
 Same as A but skip `docker compose up`. Point `DATABASE_URL` at whatever Postgres you've already got — [Neon](https://neon.tech) free tier is the lowest-effort path.
 
-### Option C — Deploy to Vercel / Render / Railway (coming soon)
+### Option C — One-click deploy
 
-One-click deploy buttons land in the next release. Until then, the source install above works on any Node host.
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2Fsudomichael%2Fcontinuum)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/sudomichael/continuum)
+
+Both will provision Postgres + an app instance from this repo. Generate `ENCRYPTION_KEY` and `CONTINUUM_TOKEN` yourself:
+
+```bash
+openssl rand -hex 32   # ENCRYPTION_KEY
+openssl rand -hex 24   # CONTINUUM_TOKEN
+```
+
+…and paste them into the env-var step.
+
+### Option D — Pre-built Docker image
+
+```bash
+docker run -p 3000:3000 \
+  -e DATABASE_URL='postgresql://...' \
+  -e ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+  -e CONTINUUM_TOKEN="$(openssl rand -hex 24)" \
+  ghcr.io/sudomichael/continuum:latest
+```
+
+`ghcr.io/sudomichael/continuum:latest` always tracks `main`. Tagged versions (`:v0.1.1`, `:0.1`) are published on every release.
 
 After `npm start`, open `http://localhost:3000` and log in with password **`continuum`** (change it immediately at `/settings`). Then install the CLI on every machine where you use Claude Code / Codex — they all point at the same Continuum.
 
