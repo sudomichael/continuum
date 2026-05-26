@@ -40,16 +40,24 @@ const cloudProxy = clerkMiddleware(async (auth, req) => {
   if (isCloudPublic(req)) return NextResponse.next();
 
   const isApi = pathname.startsWith("/api/");
+  const { userId, redirectToSignIn } = await auth();
+
   if (isApi) {
+    // Token-authed (hooks / CLI) bypass session check entirely.
     const got = req.headers.get("x-continuum-token");
     if (got && got.trim().length > 0) return NextResponse.next();
-    // Otherwise require a signed-in user (Clerk session).
-    await auth.protect();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.next();
   }
 
-  // Pages: require Clerk session.
-  await auth.protect();
+  // Pages: redirect to Clerk's sign-in flow instead of letting auth.protect()
+  // 404. Clerk's redirectToSignIn() carries the original URL as redirect_url
+  // so the user lands back where they started after signing in.
+  if (!userId) {
+    return redirectToSignIn({ returnBackUrl: req.url });
+  }
   return NextResponse.next();
 });
 
