@@ -73,32 +73,41 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 
 // ---- Stored hash lookup -----------------------------------------------------
+//
+// All four helpers now take a `workspaceId`. In self-host mode the caller
+// resolves that via getSelfHostWorkspaceId(); in cloud mode this whole
+// password code path is dead (Clerk handles auth).
 
-async function readStoredHash(): Promise<string | null> {
+async function readStoredHash(workspaceId: string): Promise<string | null> {
   const envHash = process.env.CONTINUUM_PASSWORD_HASH?.trim();
-  // DB wins if present so users can change their password without redeploying.
   const row = await prisma.settings.findUnique({
-    where: { id: "singleton" },
+    where: { workspaceId },
     select: { passwordHash: true },
   });
   return row?.passwordHash || envHash || null;
 }
 
-export async function isPasswordSet(): Promise<boolean> {
-  return Boolean(await readStoredHash());
+export async function isPasswordSet(workspaceId: string): Promise<boolean> {
+  return Boolean(await readStoredHash(workspaceId));
 }
 
-export async function writePassword(password: string): Promise<void> {
+export async function writePassword(
+  workspaceId: string,
+  password: string,
+): Promise<void> {
   const hash = hashPassword(password);
   await prisma.settings.upsert({
-    where: { id: "singleton" },
+    where: { workspaceId },
     update: { passwordHash: hash },
-    create: { id: "singleton", passwordHash: hash },
+    create: { workspaceId, passwordHash: hash },
   });
 }
 
-export async function checkPassword(password: string): Promise<boolean> {
-  const stored = await readStoredHash();
+export async function checkPassword(
+  workspaceId: string,
+  password: string,
+): Promise<boolean> {
+  const stored = await readStoredHash(workspaceId);
   if (!stored) return false;
   return verifyPassword(password, stored);
 }
@@ -142,8 +151,10 @@ export const SESSION_MAX_AGE = SESSION_TTL_SECONDS;
 
 export const DEFAULT_ADMIN_PASSWORD = "continuum";
 
-export async function seedDefaultPasswordIfMissing(): Promise<boolean> {
-  if (await isPasswordSet()) return false;
-  await writePassword(DEFAULT_ADMIN_PASSWORD);
+export async function seedDefaultPasswordIfMissing(
+  workspaceId: string,
+): Promise<boolean> {
+  if (await isPasswordSet(workspaceId)) return false;
+  await writePassword(workspaceId, DEFAULT_ADMIN_PASSWORD);
   return true;
 }

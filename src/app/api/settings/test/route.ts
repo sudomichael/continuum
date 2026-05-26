@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { pingTier } from "@/lib/ai";
 import { getSettings } from "@/lib/settings";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 
 const Body = z.object({
   tier: z.enum(["smart", "cheap"]),
@@ -15,13 +16,14 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  const workspaceId = await requireCurrentWorkspaceId();
   let parsed;
   try {
     parsed = Body.parse(await req.json());
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 400 });
   }
-  const saved = await getSettings();
+  const saved = await getSettings(workspaceId);
   const base = parsed.tier === "smart" ? saved.smart : saved.cheap;
   const config = {
     provider: parsed.provider ?? base.provider,

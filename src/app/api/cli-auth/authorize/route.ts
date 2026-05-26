@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { hashToken, makeToken } from "@/lib/cli-auth";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 
 const Body = z.object({
   code: z.string().min(8).max(64),
@@ -20,6 +21,11 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  // The user clicking "Authorize" is already signed in (proxy enforces).
+  // Whatever workspace they're currently in is the workspace the new CLI
+  // device gets bound to.
+  const workspaceId = await requireCurrentWorkspaceId();
+
   let parsed: z.infer<typeof Body>;
   try {
     parsed = Body.parse(await req.json());
@@ -58,6 +64,7 @@ export async function POST(req: Request) {
 
   const cli = await prisma.cliToken.create({
     data: {
+      workspaceId,
       tokenHash,
       name: displayName,
       platform: pairing.platform,
@@ -66,7 +73,7 @@ export async function POST(req: Request) {
 
   await prisma.cliPairing.update({
     where: { id: pairing.id },
-    data: { authorized: true, token, tokenId: cli.id },
+    data: { authorized: true, token, tokenId: cli.id, workspaceId },
   });
 
   return NextResponse.json({ ok: true, device: { id: cli.id, name: displayName } });

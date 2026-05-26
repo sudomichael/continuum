@@ -53,8 +53,12 @@ function parseJson<T>(raw: string): T {
   return JSON.parse(cleaned) as T;
 }
 
-export async function classifyCapture(body: string): Promise<ClassifyResult> {
+export async function classifyCapture(
+  workspaceId: string,
+  body: string,
+): Promise<ClassifyResult> {
   const projects = await prisma.project.findMany({
+    where: { workspaceId },
     select: { slug: true, name: true },
   });
   const list = projects
@@ -70,6 +74,7 @@ ${body}
 """`;
 
   const raw = await complete({
+    workspaceId,
     system: CLASSIFY_SYSTEM,
     messages: [{ role: "user", content: userPrompt }],
     maxTokens: 256,
@@ -188,6 +193,7 @@ ${decisionsText}
 Synthesize the current brain. Return the JSON object only.`;
 
   const raw = await complete({
+    workspaceId: project.workspaceId,
     system: SYNTHESIZE_SYSTEM,
     messages: [{ role: "user", content: userPrompt }],
     maxTokens: 4096,
@@ -211,7 +217,7 @@ Synthesize the current brain. Return the JSON object only.`;
     };
   }
 
-  const model = await activeModelName();
+  const model = await activeModelName(project.workspaceId);
   await prisma.brain.upsert({
     where: { projectId: project.id },
     update: {

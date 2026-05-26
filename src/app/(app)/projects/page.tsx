@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 import { Icon } from "@/components/icon";
 import { StatusPip } from "@/components/status-pip";
 import { timeAgo } from "@/lib/format";
@@ -7,7 +8,9 @@ import { timeAgo } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function ProjectsListPage() {
+  const workspaceId = await requireCurrentWorkspaceId();
   const projects = await prisma.project.findMany({
+    where: { workspaceId },
     orderBy: { updatedAt: "desc" },
     include: { _count: { select: { updates: true } }, brain: true },
   });

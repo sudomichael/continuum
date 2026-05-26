@@ -25,11 +25,11 @@ function resolveKey(cipher: string | null, envFallback?: string): string | null 
   return envFallback?.trim() ? envFallback : null;
 }
 
-export async function getSettings(): Promise<ResolvedSettings> {
+export async function getSettings(workspaceId: string): Promise<ResolvedSettings> {
   const row = await prisma.settings.upsert({
-    where: { id: "singleton" },
+    where: { workspaceId },
     update: {},
-    create: { id: "singleton" },
+    create: { workspaceId },
   });
 
   // Env fallbacks: per-provider keys, then a generic ANTHROPIC/OPENAI key.
@@ -65,10 +65,13 @@ export type TierUpdate = {
   apiKey?: string | null; // null clears; undefined leaves alone
 };
 
-export async function updateSettings(input: {
-  smart?: TierUpdate;
-  cheap?: TierUpdate;
-}) {
+export async function updateSettings(
+  workspaceId: string,
+  input: {
+    smart?: TierUpdate;
+    cheap?: TierUpdate;
+  },
+) {
   const data: Record<string, string | null> = {};
 
   if (input.smart) {
@@ -93,9 +96,9 @@ export async function updateSettings(input: {
   }
 
   await prisma.settings.upsert({
-    where: { id: "singleton" },
+    where: { workspaceId },
     update: data,
-    create: { id: "singleton", ...data },
+    create: { workspaceId, ...data },
   });
 }
 

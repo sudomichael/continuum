@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { synthesizeBrain } from "@/lib/synthesis";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 
 const Patch = z.object({
   name: z.string().optional(),
@@ -19,8 +20,9 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
+  const workspaceId = await requireCurrentWorkspaceId();
   const project = await prisma.project.findUnique({
-    where: { slug },
+    where: { workspaceId_slug: { workspaceId, slug } },
     include: {
       brain: true,
       threads: { orderBy: { updatedAt: "desc" }, take: 20 },
@@ -37,13 +39,17 @@ export async function PATCH(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
+  const workspaceId = await requireCurrentWorkspaceId();
   let parsed;
   try {
     parsed = Patch.parse(await req.json());
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 400 });
   }
-  const project = await prisma.project.update({ where: { slug }, data: parsed });
+  const project = await prisma.project.update({
+    where: { workspaceId_slug: { workspaceId, slug } },
+    data: parsed,
+  });
   return NextResponse.json(project);
 }
 
@@ -52,7 +58,10 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
-  await prisma.project.delete({ where: { slug } });
+  const workspaceId = await requireCurrentWorkspaceId();
+  await prisma.project.delete({
+    where: { workspaceId_slug: { workspaceId, slug } },
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -62,7 +71,10 @@ export async function POST(
 ) {
   // POST = re-synthesize the brain on demand.
   const { slug } = await params;
-  const project = await prisma.project.findUnique({ where: { slug } });
+  const workspaceId = await requireCurrentWorkspaceId();
+  const project = await prisma.project.findUnique({
+    where: { workspaceId_slug: { workspaceId, slug } },
+  });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     await synthesizeBrain(project.id);

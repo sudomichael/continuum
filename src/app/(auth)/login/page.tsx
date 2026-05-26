@@ -7,18 +7,20 @@ import {
   checkPassword,
   createSessionToken,
 } from "@/lib/auth";
+import { getSelfHostWorkspaceId } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 async function login(formData: FormData) {
   "use server";
+  const workspaceId = await getSelfHostWorkspaceId();
   const password = String(formData.get("password") ?? "");
   const next = String(formData.get("next") ?? "/");
 
   if (!password) {
     return redirect("/login?error=missing&next=" + encodeURIComponent(next));
   }
-  if (!(await checkPassword(password))) {
+  if (!(await checkPassword(workspaceId, password))) {
     return redirect("/login?error=invalid&next=" + encodeURIComponent(next));
   }
 
@@ -48,7 +50,8 @@ export default async function LoginPage({
 
   // If the default seeded password is still in use, surface it so first-run
   // users aren't stuck. Once it's changed, this disappears.
-  const defaultStillActive = await checkPassword(DEFAULT_ADMIN_PASSWORD);
+  const workspaceId = await getSelfHostWorkspaceId();
+  const defaultStillActive = await checkPassword(workspaceId, DEFAULT_ADMIN_PASSWORD);
 
   return (
     <form action={login} className="space-y-6">

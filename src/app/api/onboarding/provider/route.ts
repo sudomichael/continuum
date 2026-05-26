@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { PROVIDERS, type ProviderId } from "@/lib/providers";
 import { updateSettings } from "@/lib/settings";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 
 // Onboarding writes BOTH tiers (smart + cheap) with the same provider/key.
 // Power users split them later in /settings.
@@ -15,6 +16,7 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  const workspaceId = await requireCurrentWorkspaceId();
   let parsed;
   try {
     parsed = Body.parse(await req.json());
@@ -44,7 +46,7 @@ export async function POST(req: Request) {
   // provider's recommended SMART default.
   const model = parsed.model ?? preset.defaultSmartModel;
 
-  await updateSettings({
+  await updateSettings(workspaceId, {
     smart: { ...common, model },
     cheap: { ...common, model },
   });

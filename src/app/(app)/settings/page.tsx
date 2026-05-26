@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSettings } from "@/lib/settings";
 import { PROVIDERS } from "@/lib/providers";
 import { prisma } from "@/lib/db";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 import { SettingsForm } from "./settings-form";
 import { CliDevicesList } from "./cli-devices-list";
 import {
@@ -14,11 +15,12 @@ export const dynamic = "force-dynamic";
 
 async function changePassword(formData: FormData) {
   "use server";
+  const workspaceId = await requireCurrentWorkspaceId();
   const current = String(formData.get("current") ?? "");
   const next = String(formData.get("next") ?? "");
   const confirm = String(formData.get("confirm") ?? "");
 
-  if (!(await checkPassword(current))) {
+  if (!(await checkPassword(workspaceId, current))) {
     return redirect("/settings?pwError=current");
   }
   if (next.length < 8) {
@@ -27,7 +29,7 @@ async function changePassword(formData: FormData) {
   if (next !== confirm) {
     return redirect("/settings?pwError=mismatch");
   }
-  await writePassword(next);
+  await writePassword(workspaceId, next);
   redirect("/settings?pwOk=1");
 }
 
@@ -36,8 +38,10 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ pwError?: string; pwOk?: string }>;
 }) {
-  const s = await getSettings();
+  const workspaceId = await requireCurrentWorkspaceId();
+  const s = await getSettings(workspaceId);
   const cliDevices = await prisma.cliToken.findMany({
+    where: { workspaceId },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -48,7 +52,7 @@ export default async function SettingsPage({
     },
   });
   const { pwError, pwOk } = await searchParams;
-  const usingDefault = await checkPassword(DEFAULT_ADMIN_PASSWORD);
+  const usingDefault = await checkPassword(workspaceId, DEFAULT_ADMIN_PASSWORD);
   const pwMessage =
     pwError === "current"
       ? { tone: "error" as const, text: "Current password is wrong." }

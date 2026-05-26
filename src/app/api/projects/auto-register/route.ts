@@ -48,10 +48,14 @@ function slugify(s: string): string {
   );
 }
 
-async function uniqueSlug(base: string): Promise<string> {
+async function uniqueSlug(workspaceId: string, base: string): Promise<string> {
   let slug = base;
   let n = 2;
-  while (await prisma.project.findUnique({ where: { slug } })) {
+  while (
+    await prisma.project.findUnique({
+      where: { workspaceId_slug: { workspaceId, slug } },
+    })
+  ) {
     slug = `${base}-${n++}`;
     if (n > 50) {
       slug = `${base}-${Date.now().toString(36)}`;
@@ -93,15 +97,23 @@ function pickIcon(name: string, cwd: string): string {
 }
 
 export async function POST(req: Request) {
+  // Resolve auth → workspaceId. Web (session cookie) and hooks (CLI token /
+  // legacy shared secret) both supported; each path resolves to the right
+  // workspace.
   const jar = await cookies();
   const sessionOk = verifySessionToken(jar.get(SESSION_COOKIE)?.value);
-  if (!sessionOk) {
+  let workspaceId: string;
+  if (sessionOk) {
+    const { requireCurrentWorkspaceId } = await import("@/lib/tenant");
+    workspaceId = await requireCurrentWorkspaceId();
+  } else {
     const tokenAuth = await verifyTokenHeader(
       req.headers.get("x-continuum-token"),
     );
     if (!tokenAuth.ok) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    workspaceId = tokenAuth.workspaceId;
   }
 
   let parsed;
@@ -111,9 +123,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: String(e) }, { status: 400 });
   }
 
-  // 1. Already registered?
+  // 1. Already registered? cwd is unique-per-workspace, so look up by both.
   const existing = await prisma.project.findUnique({
-    where: { cwd: parsed.cwd },
+    where: { workspaceId_cwd: { workspaceId, cwd: parsed.cwd } },
   });
   if (existing) {
     return NextResponse.json({ project: existing, created: false });
@@ -131,11 +143,28 @@ export async function POST(req: Request) {
     );
   }
 
+  // 3. Free-tier project cap.
+  const { enforceProjectLimit, TierLimitError } = await import(
+    "@/lib/tier-limits"
+  );
+  try {
+    await enforceProjectLimit(workspaceId);
+  } catch (e) {
+    if (e instanceof TierLimitError) {
+      return NextResponse.json(
+        { error: e.message, detail: e.detail },
+        { status: e.status },
+      );
+    }
+    throw e;
+  }
+
   const name = inferName(parsed.cwd, parsed.hint);
-  const slug = await uniqueSlug(slugify(name));
+  const slug = await uniqueSlug(workspaceId, slugify(name));
 
   const created = await prisma.project.create({
     data: {
+      workspaceId,
       slug,
       name,
       cwd: parsed.cwd,

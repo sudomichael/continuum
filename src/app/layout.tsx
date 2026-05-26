@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Hanken_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 const hanken = Hanken_Grotesk({
@@ -24,12 +25,19 @@ export const metadata: Metadata = {
     "A living project brain. Continuously synthesized operational context from your AI coding sessions, decisions, and notes.",
 };
 
+const isMultiTenant =
+  process.env.CONTINUUM_MULTI_TENANT === "1" ||
+  process.env.CONTINUUM_MULTI_TENANT === "true";
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
+  // ClerkProvider is a no-op in self-host (no NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
+  // but mounting it conditionally is cheaper than always rendering it and
+  // hoping it gracefully no-ops. Self-host strictly uses the cookie auth.
+  const body = (
     <html
       lang="en"
       className={`${hanken.variable} ${inter.variable} ${jetbrains.variable} h-full`}
@@ -43,4 +51,6 @@ export default function RootLayout({
       </body>
     </html>
   );
+
+  return isMultiTenant ? <ClerkProvider>{body}</ClerkProvider> : body;
 }

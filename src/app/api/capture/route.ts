@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { classifyCapture, isValidCategory, synthesizeBrain } from "@/lib/synthesis";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 
 const Body = z.object({
   body: z.string().min(1).max(20_000),
@@ -9,6 +10,8 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  const workspaceId = await requireCurrentWorkspaceId();
+
   let parsed;
   try {
     parsed = Body.parse(await req.json());
@@ -25,7 +28,7 @@ export async function POST(req: Request) {
 
   if (!projectSlug) {
     try {
-      const cls = await classifyCapture(parsed.body);
+      const cls = await classifyCapture(workspaceId, parsed.body);
       projectSlug = cls.projectSlug;
       category = isValidCategory(cls.category) ? cls.category : "session";
       title = cls.title?.slice(0, 200) ?? null;
@@ -40,9 +43,10 @@ export async function POST(req: Request) {
   // No matching project — create an "inbox" project so nothing is lost.
   if (!projectSlug) {
     const inbox = await prisma.project.upsert({
-      where: { slug: "inbox" },
+      where: { workspaceId_slug: { workspaceId, slug: "inbox" } },
       update: {},
       create: {
+        workspaceId,
         slug: "inbox",
         name: "Inbox",
         icon: "inbox",
@@ -54,7 +58,7 @@ export async function POST(req: Request) {
   }
 
   const project = await prisma.project.findUnique({
-    where: { slug: projectSlug },
+    where: { workspaceId_slug: { workspaceId, slug: projectSlug } },
   });
   if (!project) {
     return NextResponse.json(

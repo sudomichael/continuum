@@ -3,8 +3,14 @@
 // Local dev: `docker compose up -d` (ships in repo) → postgres on :5432.
 // Hosted:    point DATABASE_URL at Neon, Supabase, RDS, etc.
 //
-// JSON-shaped payloads (e.g. Update.raw) are stored as String for portability
-// across Postgres versions and to keep the schema trivial to migrate.
+// Tenancy model
+// -------------
+// Every user-owned model carries a `workspaceId`. In self-host mode we
+// auto-create a single workspace named "personal" on first boot and pin
+// everything to it. In cloud mode (CONTINUUM_MULTI_TENANT=1) every Clerk
+// user gets a workspace on signup; the Prisma client is wrapped with an
+// extension that injects `where: { workspaceId }` into every query so
+// route handlers can't accidentally read across tenants.
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,17 +20,75 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---- Tenancy ---------------------------------------------------------------
+
+// A User is the Clerk-authenticated identity, mirrored locally so we have
+// foreign keys to point at. The `externalId` is the Clerk user id (`user_…`).
+// In self-host mode we still create one User row so cloud-mode and
+// self-host-mode code paths look identical; the row's externalId is just
+// `"self-hosted"` then.
+model User {
+  id         String   @id @default(cuid())
+  externalId String   @unique
+  email      String?
+  name       String?
+  imageUrl   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  memberships WorkspaceMember[]
+}
+
+// A Workspace owns all the project data. Free-tier limits + billing live
+// here. In self-host mode there's exactly one Workspace ("personal")
+// auto-created by bootstrap.ts.
+model Workspace {
+  id        String   @id @default(cuid())
+  slug      String   @unique  // shown in URLs / CLI metadata
+  name      String
+  tier      String   @default("free") // free | pro | team | self_hosted
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members      WorkspaceMember[]
+  projects     Project[]
+  cliTokens    CliToken[]
+  cliPairings  CliPairing[]
+  settings     Settings?
+  usageEvents  UsageEvent[]
+}
+
+// Many-to-many between User and Workspace so a single user can belong to
+// multiple workspaces (own + collaborator). For now only OWNER role; ROLE
+// is reserved for later team features.
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String   @default("owner") // owner | member (reserved)
+  createdAt   DateTime @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+// ---- Project data ----------------------------------------------------------
+
 model Project {
   id          String   @id @default(cuid())
-  slug        String   @unique
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  slug        String
   name        String
   identifier  String?
   icon        String?
   description String?
-  cwd         String?  @unique
+  cwd         String?
   state       String   @default("active") // active | near_launch | paused | exploring | archived
-  momentum    Int      @default(50)       // 0-100
-  health      Int      @default(100)      // 0-100
+  momentum    Int      @default(50)
+  health      Int      @default(100)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -32,6 +96,12 @@ model Project {
   updates   Update[]
   threads   WorkThread[]
   decisions Decision[]
+
+  // Slugs + cwds are unique PER WORKSPACE so two users can both have a
+  // project called "parcelwise" without collision.
+  @@unique([workspaceId, slug])
+  @@unique([workspaceId, cwd])
+  @@index([workspaceId, updatedAt])
 }
 
 model Brain {
@@ -62,11 +132,7 @@ model Update {
   category        String   // session | decision | blocker | architecture | idea | progress | next_action
   title           String?
   body            String
-  raw             String?  // JSON-encoded extra payload
-  // Stable id for an in-flight coding session. Used to deduplicate when a
-  // hook re-ingests the same session (e.g. Codex `Stop` fires per-turn):
-  // the server deletes prior updates with the same (source, sourceSessionId)
-  // before reinserting the latest summary + fanout.
+  raw             String?
   sourceSessionId String?
   createdAt       DateTime @default(now())
 
@@ -95,75 +161,82 @@ model Decision {
   project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   title           String
   rationale       String?
-  source          String?  // claude_code | codex | manual
-  sourceSessionId String?  // same dedup story as Update.sourceSessionId
+  source          String?
+  sourceSessionId String?
   createdAt       DateTime @default(now())
 
   @@index([projectId, createdAt])
   @@index([source, sourceSessionId])
 }
 
-// Per-device long-lived token issued to the CLI via browser pairing.
-// Each `continuum connect` run on a new machine creates one of these.
-// The token (sha256 hash) is verified on every /api/ingest call from
-// the hook scripts. Revoking a row immediately kills that device.
+// ---- CLI auth (workspace-scoped) -------------------------------------------
+
 model CliToken {
-  id         String   @id @default(cuid())
-  // sha256 hex of the actual token string. The raw token is shown
-  // exactly once during pairing and never stored.
-  tokenHash  String   @unique
-  // Human label so /settings shows "MacBook Pro" not a random id.
-  name       String
-  // Free-form OS/arch from the CLI (e.g. "darwin/arm64") for UX only.
-  platform   String?
-  createdAt  DateTime @default(now())
-  lastSeenAt DateTime?
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  name        String
+  platform    String?
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime?
+
+  @@index([workspaceId])
 }
 
-// Short-lived pairing session created when the CLI hits /api/cli-auth/start.
-// The CLI opens /cli-auth?code=... in the browser; the logged-in user
-// authorizes; the server marks this row authorized and writes the issued
-// token here. The CLI polls /api/cli-auth/poll until status flips, then
-// reads the token + cleans up.
 model CliPairing {
-  id         String   @id @default(cuid())
-  // Random opaque code shown to both the CLI (response) and the browser
-  // (URL param). Used to look up this row from either side.
-  code       String   @unique
-  // Set when the user clicks Authorize. Until then, polls return "pending".
-  authorized Boolean  @default(false)
-  // Filled in alongside authorization — the long-lived token + new CliToken id.
-  token      String?
-  tokenId    String?
-  // CLI-supplied metadata so /cli-auth can show "device: darwin/arm64".
-  platform   String?
-  // Hard expiry — CLI must complete pairing within this window.
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  id          String    @id @default(cuid())
+  // Workspace is filled in at authorize-time, not start-time. Until then
+  // we don't know who's pairing.
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  code        String    @unique
+  authorized  Boolean   @default(false)
+  token       String?
+  tokenId     String?
+  platform    String?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
 }
 
-// Single-row settings (id = "singleton"). Each tier has its own fully
-// configurable provider so users can mix-and-match (e.g. Anthropic for
-// synthesis, Ollama for summarization). API keys are AES-256-GCM encrypted.
-model Settings {
-  id String @id @default("singleton")
+// ---- Settings (one row per workspace) --------------------------------------
 
-  // Single-user web auth. Scrypt-hashed password (see src/lib/auth.ts).
-  // Null until the user sets one via /setup. Hook/MCP API access uses
-  // CONTINUUM_TOKEN independently and ignores this.
+model Settings {
+  workspaceId String   @id  // one Settings per workspace
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // Single-user web auth lives here ONLY in self-host mode. In cloud mode
+  // we use Clerk; this column is null.
   passwordHash String?
 
-  // SMART tier — brain synthesis (low volume, strategic).
   smartProvider  String  @default("anthropic")
   smartBaseUrl   String  @default("https://api.anthropic.com")
   smartModel     String  @default("claude-sonnet-4-6")
   smartKeyCipher String?
 
-  // CHEAP tier — session summarization + capture classification (high volume).
   cheapProvider  String  @default("anthropic")
   cheapBaseUrl   String  @default("https://api.anthropic.com")
   cheapModel     String  @default("claude-haiku-4-5")
   cheapKeyCipher String?
 
   updatedAt DateTime @updatedAt
+}
+
+// ---- Usage metering --------------------------------------------------------
+
+// One row per billable event (session ingested, brain synthesized, etc).
+// Used to enforce free-tier limits and, later, meter paid usage. Keep the
+// shape small and add columns lazily.
+model UsageEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  kind        String   // session_ingested | brain_synthesized | capture_classified
+  // Optional token-cost tracking for honest pricing later. Null when unknown.
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Float?
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
 }

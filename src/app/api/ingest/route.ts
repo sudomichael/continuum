@@ -6,6 +6,11 @@ import { synthesizeBrain } from "@/lib/synthesis";
 import { verifyTokenHeader } from "@/lib/cli-auth";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import {
+  enforceSessionLimit,
+  recordSessionIngested,
+  TierLimitError,
+} from "@/lib/tier-limits";
 
 const Body = z.object({
   cwd: z.string().optional(),
@@ -53,17 +58,24 @@ function tryParse(raw: string): SessionSummary | null {
 }
 
 export async function POST(req: Request) {
-  // Auth: accept (a) a valid session cookie (web UI), (b) the legacy shared
-  // secret in CONTINUUM_TOKEN, or (c) a per-device CLI token.
+  // Auth: accept (a) a valid session cookie (web UI, self-host mode),
+  // (b) a per-device CLI token, or (c) the legacy shared CONTINUUM_TOKEN.
+  // Each resolves to a workspaceId — cookie/legacy → self-host workspace;
+  // CLI token → the workspace it was issued under.
   const jar = await cookies();
   const sessionOk = verifySessionToken(jar.get(SESSION_COOKIE)?.value);
-  if (!sessionOk) {
+  let workspaceId: string;
+  if (sessionOk) {
+    const { requireCurrentWorkspaceId } = await import("@/lib/tenant");
+    workspaceId = await requireCurrentWorkspaceId();
+  } else {
     const tokenAuth = await verifyTokenHeader(
       req.headers.get("x-continuum-token"),
     );
     if (!tokenAuth.ok) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    workspaceId = tokenAuth.workspaceId;
   }
 
   let parsed;
@@ -76,15 +88,31 @@ export async function POST(req: Request) {
     );
   }
 
-  // Resolve project: explicit slug > cwd lookup.
+  // Enforce free-tier session-per-month cap before doing the AI summary
+  // (which is the actual cost driver). Returns 402 if exhausted.
+  try {
+    await enforceSessionLimit(workspaceId);
+  } catch (e) {
+    if (e instanceof TierLimitError) {
+      return NextResponse.json(
+        { error: e.message, detail: e.detail },
+        { status: e.status },
+      );
+    }
+    throw e;
+  }
+
+  // Resolve project within this workspace: explicit slug > cwd lookup.
   let project = null;
   if (parsed.projectSlug) {
     project = await prisma.project.findUnique({
-      where: { slug: parsed.projectSlug },
+      where: { workspaceId_slug: { workspaceId, slug: parsed.projectSlug } },
     });
   }
   if (!project && parsed.cwd) {
-    project = await prisma.project.findUnique({ where: { cwd: parsed.cwd } });
+    project = await prisma.project.findUnique({
+      where: { workspaceId_cwd: { workspaceId, cwd: parsed.cwd } },
+    });
   }
   if (!project) {
     return NextResponse.json(
@@ -106,6 +134,7 @@ export async function POST(req: Request) {
   let raw: string;
   try {
     raw = await complete({
+      workspaceId,
       system: SESSION_SUMMARIZE_SYSTEM,
       messages: [{ role: "user", content: trimmed }],
       maxTokens: 2048,
@@ -124,12 +153,14 @@ export async function POST(req: Request) {
   // Idempotency: if this ingest is keyed by sessionId (e.g. Codex Stop hook
   // firing per-turn), drop any prior fanout for the same session before
   // reinserting the latest snapshot. Without a sessionId we always append.
+  // Scope the dedup to this project (and therefore this workspace) so two
+  // different workspaces can use overlapping session ids without conflict.
   if (sid) {
     await prisma.update.deleteMany({
-      where: { source: parsed.source, sourceSessionId: sid },
+      where: { projectId: project.id, source: parsed.source, sourceSessionId: sid },
     });
     await prisma.decision.deleteMany({
-      where: { source: parsed.source, sourceSessionId: sid },
+      where: { projectId: project.id, source: parsed.source, sourceSessionId: sid },
     });
   }
 
@@ -222,6 +253,9 @@ export async function POST(req: Request) {
       },
     });
   }
+
+  // Best-effort usage record (don't fail the ingest if metering hiccups).
+  recordSessionIngested(workspaceId).catch(() => {});
 
   try {
     await synthesizeBrain(project.id);

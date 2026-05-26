@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSettings, updateSettings } from "@/lib/settings";
 import { PROVIDERS } from "@/lib/providers";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 
 export async function GET() {
-  const s = await getSettings();
+  const workspaceId = await requireCurrentWorkspaceId();
+  const s = await getSettings(workspaceId);
   return NextResponse.json({
     smart: {
       provider: s.smart.provider,
@@ -43,6 +45,7 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  const workspaceId = await requireCurrentWorkspaceId();
   let parsed;
   try {
     parsed = Body.parse(await req.json());
@@ -53,7 +56,7 @@ export async function POST(req: Request) {
     );
   }
   try {
-    await updateSettings(parsed);
+    await updateSettings(workspaceId, parsed);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }

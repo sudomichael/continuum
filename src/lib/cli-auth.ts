@@ -43,12 +43,16 @@ export const PAIRING_TTL_MS = 10 * 60 * 1000;
 
 // Verify a token from an X-Continuum-Token header against (a) the legacy
 // shared secret in CONTINUUM_TOKEN env, and (b) per-device CLI tokens stored
-// in the DB. Returns the kind of credential that matched so callers can log
-// usage or bump CliToken.lastSeenAt.
+// in the DB. Returns the workspaceId the token is authorized for, so
+// callers can scope every subsequent query.
+//
+// In self-host mode, the legacy shared secret implicitly resolves to the
+// singleton "personal" workspace. CLI tokens always carry their own
+// workspaceId since they're issued per-pairing.
 type TokenAuthResult =
   | { ok: false }
-  | { ok: true; kind: "shared" }
-  | { ok: true; kind: "cli"; tokenId: string };
+  | { ok: true; kind: "shared"; workspaceId: string }
+  | { ok: true; kind: "cli"; tokenId: string; workspaceId: string };
 
 export async function verifyTokenHeader(
   raw: string | null | undefined,
@@ -58,15 +62,21 @@ export async function verifyTokenHeader(
   if (!got) return { ok: false };
 
   const shared = process.env.CONTINUUM_TOKEN;
-  if (shared && got === shared) return { ok: true, kind: "shared" };
+  if (shared && got === shared) {
+    // Legacy shared secret only exists in self-host mode. Map to the
+    // singleton workspace so route handlers don't need to special-case.
+    const { getSelfHostWorkspaceId } = await import("./tenant");
+    const workspaceId = await getSelfHostWorkspaceId();
+    return { ok: true, kind: "shared", workspaceId };
+  }
 
-  // CLI device tokens: stored as sha256 hex. Lookup is constant-time
-  // enough at this scale (one row per device, indexed by tokenHash unique).
+  // CLI device tokens: stored as sha256 hex. Looked up by hash, returning
+  // the workspaceId the device was paired against.
   const { prisma } = await import("./db");
   const hash = hashToken(got);
   const row = await prisma.cliToken.findUnique({
     where: { tokenHash: hash },
-    select: { id: true },
+    select: { id: true, workspaceId: true },
   });
   if (!row) return { ok: false };
 
@@ -75,5 +85,5 @@ export async function verifyTokenHeader(
     .update({ where: { id: row.id }, data: { lastSeenAt: new Date() } })
     .catch(() => {});
 
-  return { ok: true, kind: "cli", tokenId: row.id };
+  return { ok: true, kind: "cli", tokenId: row.id, workspaceId: row.workspaceId };
 }

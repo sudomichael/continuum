@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 import { Icon } from "@/components/icon";
 import { StatusPip } from "@/components/status-pip";
 import { HealthRing } from "@/components/health-ring";
@@ -14,8 +15,9 @@ type PageProps = { params: Promise<{ slug: string }> };
 
 export default async function ProjectBrainPage({ params }: PageProps) {
   const { slug } = await params;
+  const workspaceId = await requireCurrentWorkspaceId();
   const project = await prisma.project.findUnique({
-    where: { slug },
+    where: { workspaceId_slug: { workspaceId, slug } },
     include: {
       brain: true,
       threads: { orderBy: { updatedAt: "desc" } },

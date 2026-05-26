@@ -11,6 +11,7 @@ import { timeAgo } from "@/lib/format";
 import { OnboardingGate } from "@/components/onboarding-gate";
 import { OnboardingProviderForm } from "@/components/onboarding-provider-form";
 import { getSettings, tierUsable } from "@/lib/settings";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -20,12 +21,13 @@ export default async function DashboardPage({
   searchParams: Promise<{ "skip-onboarding"?: string }>;
 }) {
   const { "skip-onboarding": skip } = await searchParams;
+  const workspaceId = await requireCurrentWorkspaceId();
 
   // Setup gate: persists until an AI provider is configured AND at least
   // one coding-agent hook is installed on this host. Bypass with
   // ?skip-onboarding=1.
   if (!skip) {
-    const settings = await getSettings();
+    const settings = await getSettings(workspaceId);
     const aiReady = tierUsable(settings.smart) || tierUsable(settings.cheap);
 
     // Per-tool detection. Either being present is enough to advance the gate.
@@ -88,7 +90,7 @@ continuum connect`,
   }
 
   const projects = await prisma.project.findMany({
-    where: { state: { not: "archived" } },
+    where: { workspaceId, state: { not: "archived" } },
     include: {
       brain: true,
       updates: { orderBy: { createdAt: "desc" }, take: 1 },
@@ -99,7 +101,7 @@ continuum connect`,
 
   const blockerCountsByProject = await prisma.update.groupBy({
     by: ["projectId"],
-    where: { category: "blocker" },
+    where: { category: "blocker", project: { workspaceId } },
     _count: { _all: true },
   });
   const blockerMap = new Map(
@@ -107,7 +109,7 @@ continuum connect`,
   );
 
   const recentBlockers = await prisma.update.findMany({
-    where: { category: "blocker" },
+    where: { category: "blocker", project: { workspaceId } },
     orderBy: { createdAt: "desc" },
     take: 5,
     include: { project: true },

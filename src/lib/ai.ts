@@ -17,13 +17,14 @@ function isDemoMode(anyUsable: boolean): boolean {
 }
 
 export async function complete(opts: {
+  workspaceId: string;
   system: string;
   messages: ChatMessage[];
   maxTokens?: number;
   jsonResponse?: boolean;
   tier?: Tier;
 }): Promise<string> {
-  const s = await getSettings();
+  const s = await getSettings(opts.workspaceId);
   const requested: Tier = opts.tier ?? "smart";
 
   const smartOk = tierUsable(s.smart);
@@ -114,8 +115,11 @@ async function openaiCompatibleCall(
   return (r.choices[0]?.message?.content ?? "").trim();
 }
 
-export async function activeModelName(tier: Tier = "smart"): Promise<string> {
-  const s = await getSettings();
+export async function activeModelName(
+  workspaceId: string,
+  tier: Tier = "smart",
+): Promise<string> {
+  const s = await getSettings(workspaceId);
   const smartOk = tierUsable(s.smart);
   const cheapOk = tierUsable(s.cheap);
   if (isDemoMode(smartOk || cheapOk)) return "demo";

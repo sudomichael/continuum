@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { requireCurrentWorkspaceId } from "@/lib/tenant";
 import { Icon } from "@/components/icon";
 import { timeAgo, categoryColor } from "@/lib/format";
 
@@ -26,13 +27,17 @@ export default async function TimelinePage({
   const sp = await searchParams;
   const cat = sp.category && sp.category !== "all" ? sp.category : undefined;
   const slug = sp.project;
+  const workspaceId = await requireCurrentWorkspaceId();
 
   const project = slug
-    ? await prisma.project.findUnique({ where: { slug } })
+    ? await prisma.project.findUnique({
+        where: { workspaceId_slug: { workspaceId, slug } },
+      })
     : null;
 
   const updates = await prisma.update.findMany({
     where: {
+      project: { workspaceId },
       ...(cat ? { category: cat } : {}),
       ...(project ? { projectId: project.id } : {}),
     },
