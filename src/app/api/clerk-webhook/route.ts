@@ -103,7 +103,19 @@ export async function POST(req: Request) {
           slug,
           name: name ?? email ?? "Workspace",
           tier: "free",
-          settings: { create: {} },
+          // Default new cloud workspaces to OpenAI so the master env key
+          // (OPENAI_API_KEY) gets picked up as a fallback in src/lib/settings.ts.
+          // Users can switch providers + add their own key in /settings later.
+          settings: {
+            create: {
+              smartProvider: "openai",
+              smartBaseUrl: "https://api.openai.com/v1",
+              smartModel: "gpt-4o",
+              cheapProvider: "openai",
+              cheapBaseUrl: "https://api.openai.com/v1",
+              cheapModel: "gpt-4o-mini",
+            },
+          },
           members: {
             create: {
               user: { connect: { externalId: data.id } },

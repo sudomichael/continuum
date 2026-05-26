@@ -129,7 +129,18 @@ async function provisionWorkspaceForClerkUser(
       slug,
       name: name ?? email ?? "Workspace",
       tier: "free",
-      settings: { create: {} },
+      // Same OpenAI default as the Clerk webhook path — see
+      // src/app/api/clerk-webhook/route.ts for the why.
+      settings: {
+        create: {
+          smartProvider: "openai",
+          smartBaseUrl: "https://api.openai.com/v1",
+          smartModel: "gpt-4o",
+          cheapProvider: "openai",
+          cheapBaseUrl: "https://api.openai.com/v1",
+          cheapModel: "gpt-4o-mini",
+        },
+      },
       members: {
         create: { user: { connect: { id: user.id } }, role: "owner" },
       },
