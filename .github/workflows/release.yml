@@ -114,3 +114,87 @@ jobs:
             dist/SHA256SUMS
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+  # Auto-bump the Homebrew formula at sudomichael/homebrew-tap right after
+  # publishing. Runs as a downstream job (vs. the standalone release:published
+  # workflow we tried first) because GitHub deliberately does NOT fire the
+  # `release:published` event when the release is created by GITHUB_TOKEN —
+  # a documented anti-loop guard. Same-workflow job avoids that.
+  homebrew:
+    name: bump homebrew tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version + SHA256SUMS
+        id: meta
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          version="${TAG#v}"
+          sums="$(curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${TAG}/SHA256SUMS")"
+          extract() {
+            echo "$sums" | awk -v file="$1" '$2 == file { print $1; exit }'
+          }
+          {
+            echo "version=$version"
+            echo "sha_darwin_arm64=$(extract continuum-darwin-arm64)"
+            echo "sha_darwin_amd64=$(extract continuum-darwin-amd64)"
+            echo "sha_linux_arm64=$(extract continuum-linux-arm64)"
+            echo "sha_linux_amd64=$(extract continuum-linux-amd64)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: sudomichael/homebrew-tap
+          token: ${{ secrets.TAP_REPO_TOKEN }}
+          path: tap
+
+      - name: Patch formula
+        env:
+          V: ${{ steps.meta.outputs.version }}
+          S_DA: ${{ steps.meta.outputs.sha_darwin_arm64 }}
+          S_DI: ${{ steps.meta.outputs.sha_darwin_amd64 }}
+          S_LA: ${{ steps.meta.outputs.sha_linux_arm64 }}
+          S_LI: ${{ steps.meta.outputs.sha_linux_amd64 }}
+        working-directory: tap
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import os, re
+          path = "Formula/continuum.rb"
+          s = open(path).read()
+          v   = os.environ["V"]
+          shas = [os.environ[k] for k in ("S_DA","S_DI","S_LA","S_LI")]
+
+          # Bump version "X.Y.Z" on the first match.
+          s = re.sub(r'^(\s*version\s+)"[^"]+"', f'\\1"{v}"', s, count=1, flags=re.M)
+
+          # Replace the 4 sha256 lines, top-to-bottom, in order:
+          # darwin/arm, darwin/amd, linux/arm, linux/amd
+          it = iter(shas)
+          s = re.sub(
+              r'(sha256\s+")[^"]+(")',
+              lambda m: m.group(1) + next(it) + m.group(2),
+              s,
+          )
+          open(path, "w").write(s)
+          PY
+          cat Formula/continuum.rb
+
+      - name: Commit + push
+        working-directory: tap
+        env:
+          V: ${{ steps.meta.outputs.version }}
+        run: |
+          set -eu
+          git config user.name  "continuum-bot"
+          git config user.email "bot@getcontinuum.dev"
+          git add Formula/continuum.rb
+          if git diff --cached --quiet; then
+            echo "Formula unchanged; nothing to commit."
+            exit 0
+          fi
+          git commit -m "continuum $V"
+          git push
