@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -148,9 +149,33 @@ func runConnect(urlFlag string, yes bool) error {
 	}
 
 	fmt.Println()
-	fmt.Println("All set. Restart any open Claude Code / Codex sessions so they pick up the new hooks.")
+	fmt.Println("Hooks installed. One last step:")
+	fmt.Println()
+	fmt.Printf("  → Open %s and finish setup (pick an AI provider).\n", url)
+	fmt.Println()
+	fmt.Println("Without an AI provider, transcripts ingest fine but synthesis stays in demo mode.")
+	fmt.Println("Restart any open Claude Code / Codex sessions so they pick up the new hooks.")
+
+	// Best-effort: open the dashboard so the user lands directly on the
+	// onboarding gate (which catches missing AI provider). Same opener
+	// we used for the auth flow.
+	_ = openBrowser(url)
+
 	telemetry.Event("connect", Version)
 	return nil
+}
+
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
 }
 
 // ---- prompts ----------------------------------------------------------------
