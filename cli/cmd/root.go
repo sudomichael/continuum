@@ -23,6 +23,7 @@ Typical first run:
 		SilenceErrors: true,
 	}
 	root.AddCommand(connectCmd())
+	root.AddCommand(syncCmd())
 	root.AddCommand(statusCmd())
 	root.AddCommand(doctorCmd())
 	root.AddCommand(disconnectCmd())

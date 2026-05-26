@@ -149,16 +149,21 @@ func runConnect(urlFlag string, yes bool) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Hooks installed. One last step:")
+	fmt.Println("Hooks installed. Importing your existing Claude Code sessions…")
 	fmt.Println()
-	fmt.Printf("  → Open %s and finish setup (pick an AI provider).\n", url)
-	fmt.Println()
-	fmt.Println("Without an AI provider, transcripts ingest fine but synthesis stays in demo mode.")
-	fmt.Println("Restart any open Claude Code / Codex sessions so they pick up the new hooks.")
 
-	// Best-effort: open the dashboard so the user lands directly on the
-	// onboarding gate (which catches missing AI provider). Same opener
-	// we used for the auth flow.
+	// Backfill any pre-existing transcripts so the dashboard doesn't open
+	// to an empty state. Without this, the user's first dashboard load
+	// shows their projects with 0 updates each (SessionEnd only fires on
+	// future clean exits — anything pre-install is invisible).
+	if err := RunSync(0, true); err != nil {
+		// Soft-fail: hooks are installed, future sessions will work.
+		fmt.Printf("  ! sync had errors: %v\n", err)
+		fmt.Println("  Future Claude Code sessions will still ingest via the hooks.")
+	}
+
+	fmt.Println()
+	fmt.Printf("Open %s to finish setup (pick an AI provider if you haven't).\n", url)
 	_ = openBrowser(url)
 
 	telemetry.Event("connect", Version)

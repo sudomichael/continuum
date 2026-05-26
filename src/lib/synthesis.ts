@@ -217,19 +217,47 @@ Synthesize the current brain. Return the JSON object only.`;
     };
   }
 
+  // Defensive normalization: even with "respond with strings" in the prompt,
+  // models (esp. gpt-4o-mini) sometimes return arrays for bullet-y fields
+  // like nextActions / openQuestions. Coerce anything not-a-string into a
+  // bulleted string so the Brain schema's String? columns accept it.
+  const normalized: BrainPayload = {
+    currentFocus: asString(payload.currentFocus),
+    whatIsThis: asString(payload.whatIsThis),
+    productState: asString(payload.productState),
+    architecture: asString(payload.architecture),
+    strategicDirection: asString(payload.strategicDirection),
+    recentProgress: asString(payload.recentProgress),
+    openQuestions: asString(payload.openQuestions),
+    nextActions: asString(payload.nextActions),
+  };
+
   const model = await activeModelName(project.workspaceId);
   await prisma.brain.upsert({
     where: { projectId: project.id },
     update: {
-      ...payload,
+      ...normalized,
       lastSynthesizedAt: new Date(),
       synthesisModel: model,
     },
     create: {
       projectId: project.id,
-      ...payload,
+      ...normalized,
       lastSynthesizedAt: new Date(),
       synthesisModel: model,
     },
   });
+}
+
+// Coerce mixed model outputs into a single string. Strings pass through;
+// arrays become "- item\n- item"; objects/numbers/etc get JSON-stringified.
+function asString(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v == null) return "";
+  if (Array.isArray(v)) {
+    return v
+      .map((item) => (typeof item === "string" ? `- ${item}` : `- ${JSON.stringify(item)}`))
+      .join("\n");
+  }
+  return JSON.stringify(v);
 }
