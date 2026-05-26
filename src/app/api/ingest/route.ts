@@ -51,10 +51,53 @@ function tryParse(raw: string): SessionSummary | null {
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/\s*```$/i, "")
       .trim();
-    return JSON.parse(cleaned) as SessionSummary;
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    // Defensive normalize. Models (esp. gpt-4o-mini) sometimes return
+    // `summary` as a bullet array even when the prompt says "string", and
+    // sometimes return `decisions`/etc as a single string when they should
+    // be arrays. Coerce everything to the shape Prisma expects.
+    return {
+      title: asString(parsed.title),
+      summary: asString(parsed.summary),
+      decisions: asStringArray(parsed.decisions),
+      blockers: asStringArray(parsed.blockers),
+      nextActions: asStringArray(parsed.nextActions),
+      architectureNotes: asStringArray(parsed.architectureNotes),
+    };
   } catch {
     return null;
   }
+}
+
+// Coerce mixed model outputs into a single string. Arrays become a
+// bulleted markdown list; everything else gets stringified.
+function asString(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v == null) return "";
+  if (Array.isArray(v)) {
+    return v
+      .map((item) =>
+        typeof item === "string" ? `- ${item}` : `- ${JSON.stringify(item)}`,
+      )
+      .join("\n");
+  }
+  return JSON.stringify(v);
+}
+
+// Coerce mixed model outputs into a string[]. Strings become a single-item
+// array; arrays get cleaned to strings; everything else returns [].
+function asStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) {
+    return v.flatMap((item) =>
+      typeof item === "string"
+        ? [item]
+        : item == null
+          ? []
+          : [JSON.stringify(item)],
+    );
+  }
+  if (typeof v === "string" && v.trim()) return [v];
+  return [];
 }
 
 export async function POST(req: Request) {
