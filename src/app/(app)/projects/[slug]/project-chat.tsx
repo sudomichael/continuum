@@ -4,8 +4,9 @@
 // of the project page. Posts to /api/projects/[slug]/chat which feeds the
 // project's synthesized brain + recent updates into the model as context.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icon";
+import { subscribe } from "./chat-bus";
 
 type Message = {
   id: string;
@@ -54,44 +55,70 @@ export function ProjectChat({ slug }: { slug: string }) {
     el.scrollTop = el.scrollHeight;
   }, [messages.length, sending]);
 
-  async function send() {
-    const text = input.trim();
-    if (!text || sending) return;
-    setSending(true);
-    setError(null);
+  // useCallback so the bus-subscription effect below doesn't recreate this
+  // (and the subscription) on every render — would re-fire on stale state.
+  const send = useCallback(
+    async (override?: string) => {
+      const text = (override ?? input).trim();
+      if (!text || sending) return;
+      setSending(true);
+      setError(null);
 
-    // Optimistic insert: show the user message immediately, swap in the
-    // server-saved one when the assistant replies.
-    const tempId = `local-${Date.now()}`;
-    setMessages((m) => [
-      ...m,
-      {
-        id: tempId,
-        role: "user",
-        content: text,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-    setInput("");
+      // Optimistic insert: show the user message immediately, swap in the
+      // server-saved one when the assistant replies.
+      const tempId = `local-${Date.now()}`;
+      setMessages((m) => [
+        ...m,
+        {
+          id: tempId,
+          role: "user",
+          content: text,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      if (!override) setInput("");
 
-    try {
-      const r = await fetch(`/api/projects/${slug}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
-      });
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}));
-        throw new Error(body.error ?? `HTTP ${r.status}`);
+      try {
+        const r = await fetch(`/api/projects/${slug}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text }),
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error ?? `HTTP ${r.status}`);
+        }
+        const data = (await r.json()) as { message: Message };
+        setMessages((m) => [...m, data.message]);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSending(false);
       }
-      const data = (await r.json()) as { message: Message };
-      setMessages((m) => [...m, data.message]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSending(false);
-    }
-  }
+    },
+    [input, sending, slug],
+  );
+
+  // External components (e.g. clicking an Open Thread on the project page)
+  // can call askBrain(prompt) to open this panel + send a prompt directly.
+  // We don't want to fire send() while the lazy history is still loading,
+  // because the model would lose continuity with previous chat. So we
+  // open + queue + fire after history settles.
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  useEffect(() => {
+    return subscribe((prompt) => {
+      setOpen(true);
+      setPendingPrompt(prompt);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    if (!loaded) return; // wait for history fetch
+    const p = pendingPrompt;
+    setPendingPrompt(null);
+    void send(p);
+  }, [pendingPrompt, loaded, send]);
 
   if (!open) {
     return (

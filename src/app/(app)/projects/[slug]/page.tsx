@@ -7,6 +7,7 @@ import { BrainSection } from "@/components/brain-section";
 import { timeAgo, categoryColor } from "@/lib/format";
 import { ResynthesizeButton } from "./resynth-button";
 import { ProjectChat } from "./project-chat";
+import { OpenThreadsList } from "./open-threads-list";
 
 export const dynamic = "force-dynamic";
 
@@ -101,11 +102,10 @@ export default async function ProjectBrainPage({ params }: PageProps) {
             title="Architecture snapshot"
             content={brain?.architectureSnapshot}
           />
-          <BrainSection
-            icon="forum"
-            title="Open threads"
-            content={brain?.openThreads}
-          />
+          {/* Open threads is its own component because each item is a
+              clickable entry-point into the chat — PM-level rehydration
+              up here, engineering-depth drill-down in the chat panel. */}
+          <OpenThreadsList content={brain?.openThreads ?? null} />
         </div>
       </div>
 
