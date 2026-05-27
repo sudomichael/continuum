@@ -92,10 +92,11 @@ model Project {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  brain     Brain?
-  updates   Update[]
-  threads   WorkThread[]
-  decisions Decision[]
+  brain        Brain?
+  updates      Update[]
+  threads      WorkThread[]
+  decisions    Decision[]
+  chatMessages ChatMessage[]
 
   // Slugs + cwds are unique PER WORKSPACE so two users can both have a
   // project called "parcelwise" without collision.
@@ -161,6 +162,25 @@ model WorkThread {
   updatedAt   DateTime @updatedAt
 
   @@index([projectId, state])
+}
+
+// One row per user/assistant message in the per-project chat panel.
+// Chat is scoped to a single project — its context is that project's
+// brain + recent updates, not the whole workspace. We persist history so
+// the panel survives page reloads and so the user can scroll back days
+// later and re-read what they asked.
+model ChatMessage {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role        String   // "user" | "assistant"
+  content     String
+  // Token counts let us surface cost honestly later. Null until metered.
+  inputTokens  Int?
+  outputTokens Int?
+  createdAt   DateTime @default(now())
+
+  @@index([projectId, createdAt])
 }
 
 model Decision {

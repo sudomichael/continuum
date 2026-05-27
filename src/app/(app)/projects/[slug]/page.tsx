@@ -6,6 +6,7 @@ import { Icon } from "@/components/icon";
 import { BrainSection } from "@/components/brain-section";
 import { timeAgo, categoryColor } from "@/lib/format";
 import { ResynthesizeButton } from "./resynth-button";
+import { ProjectChat } from "./project-chat";
 
 export const dynamic = "force-dynamic";
 
@@ -197,6 +198,8 @@ export default async function ProjectBrainPage({ params }: PageProps) {
           </section>
         </div>
       </details>
+
+      <ProjectChat slug={project.slug} />
     </div>
   );
 }
