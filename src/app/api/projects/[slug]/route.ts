@@ -69,7 +69,9 @@ export async function POST(
   _req: Request,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  // POST = re-synthesize the brain on demand.
+  // POST = re-synthesize the brain on demand. force=true bypasses the
+  // freshness gate that ingest uses — clicking the button means the user
+  // explicitly wants a new synthesis regardless of cache age.
   const { slug } = await params;
   const workspaceId = await requireCurrentWorkspaceId();
   const project = await prisma.project.findUnique({
@@ -77,9 +79,9 @@ export async function POST(
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
-    await synthesizeBrain(project.id);
+    const result = await synthesizeBrain(project.id, { force: true });
+    return NextResponse.json({ ok: true, result });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
-  return NextResponse.json({ ok: true });
 }

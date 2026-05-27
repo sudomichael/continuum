@@ -117,7 +117,22 @@ type BrainPayload = {
   openThreads: string;
 };
 
-export async function synthesizeBrain(projectId: string): Promise<void> {
+// Brain re-synthesis cost control — see commit message for the math.
+// Skip the smart-tier LLM call unless either:
+//   - the existing brain is older than this many minutes, OR
+//   - this many new updates have landed since the last successful synth.
+// The explicit "Re-synthesize" button passes force=true and bypasses both.
+const RESYNTHESIZE_STALE_MINUTES = 10;
+const RESYNTHESIZE_NEW_UPDATE_THRESHOLD = 5;
+
+export type SynthesizeResult =
+  | { synthesized: true }
+  | { synthesized: false; reason: "fresh" | "no-updates" };
+
+export async function synthesizeBrain(
+  projectId: string,
+  opts: { force?: boolean } = {},
+): Promise<SynthesizeResult> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
@@ -127,7 +142,27 @@ export async function synthesizeBrain(projectId: string): Promise<void> {
       decisions: { orderBy: { createdAt: "desc" }, take: 20 },
     },
   });
-  if (!project) return;
+  if (!project) return { synthesized: false, reason: "no-updates" };
+
+  // Gate: skip if brain is fresh AND not many new updates since last synth.
+  if (!opts.force && project.brain?.lastSynthesizedAt) {
+    const ageMs = Date.now() - project.brain.lastSynthesizedAt.getTime();
+    const stale = ageMs > RESYNTHESIZE_STALE_MINUTES * 60 * 1000;
+
+    if (!stale) {
+      const newSinceSynth = project.updates.filter(
+        (u) =>
+          u.createdAt.getTime() > project.brain!.lastSynthesizedAt!.getTime(),
+      ).length;
+      if (newSinceSynth < RESYNTHESIZE_NEW_UPDATE_THRESHOLD) {
+        return { synthesized: false, reason: "fresh" };
+      }
+    }
+  }
+
+  if (project.updates.length === 0) {
+    return { synthesized: false, reason: "no-updates" };
+  }
 
   const existing = project.brain;
   const existingText = existing
@@ -243,6 +278,7 @@ Synthesize the current brain. Return the JSON object only.`;
       synthesisModel: model,
     },
   });
+  return { synthesized: true };
 }
 
 // Coerce mixed model outputs into a single string. Strings pass through;
