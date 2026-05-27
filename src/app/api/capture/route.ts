@@ -77,6 +77,12 @@ export async function POST(req: Request) {
     },
   });
 
+  // Same bump as ingest — keep "last worked on" honest on the dashboard.
+  await prisma.project.update({
+    where: { id: project.id },
+    data: { updatedAt: new Date() },
+  });
+
   try {
     await synthesizeBrain(project.id);
   } catch (e) {

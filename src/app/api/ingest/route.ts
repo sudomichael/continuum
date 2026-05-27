@@ -297,6 +297,15 @@ export async function POST(req: Request) {
     });
   }
 
+  // Bump the project's updatedAt so the dashboard's "last worked on"
+  // sort reflects actual activity. Prisma's @updatedAt only fires when
+  // the row itself is written, not when a child row is created — so we
+  // touch the project explicitly here. One write per ingest is cheap.
+  await prisma.project.update({
+    where: { id: project.id },
+    data: { updatedAt: new Date() },
+  });
+
   // Best-effort usage record (don't fail the ingest if metering hiccups).
   recordSessionIngested(workspaceId).catch(() => {});
 
