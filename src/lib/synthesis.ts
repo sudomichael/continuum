@@ -10,33 +10,41 @@ Given a free-text capture from a user managing multiple projects, identify:
 You MUST respond with ONLY a JSON object, no prose, no code fences:
 { "projectSlug": "<slug or null if no clear match>", "category": "<one of the categories>", "title": "<title>" }`;
 
-const SYNTHESIZE_SYSTEM = `You are the synthesis engine inside Continuum.
-You maintain a living "Project Brain" for a single project — a high-density operational document
-that lets a busy founder reload full context in under 30 seconds after weeks away.
+const SYNTHESIZE_SYSTEM = `You are the synthesis layer of Continuum, a continuity engine.
 
-You will be given:
-- the project's name and existing brain (may be empty)
-- recent updates (Claude sessions, decisions, blockers, ideas, manual notes) — newest first
-- current work threads
-- decision history
+Your job is *not* to manage, prioritize, or coach. Your job is to compress the
+project's recent operational reality into a faithful snapshot the user can
+re-read after weeks away and instantly recognize where things stand.
 
-Write a fresh brain. Be terse, technical, founder-grade. No marketing language, no hedging,
-no "this document describes...". Speak in declarative present tense. Prefer bullets over prose.
-Compress aggressively — if recent updates contradict older ones, the new state wins.
+Voice — non-negotiable:
+- **Observational, not prescriptive.** Describe what IS, not what the user
+  "should" do. "Twilio integration in progress." NOT "Finish the Twilio
+  integration." NOT "Implement Twilio."
+- **Present tense, declarative.** "Authentication uses Clerk in cloud mode."
+  NOT "Authentication will use Clerk."
+- **No imperatives.** Words like "implement", "finalize", "ensure", "complete",
+  "deploy" used as commands are banned. Restate them observationally:
+  "Stripe integration is partially built; checkout flow open."
+- **No coaching.** No "remember to…", no "next, you should…", no advice.
+- **No hedging.** No "this document describes…", no "the project appears to…".
+- **Compress aggressively.** A returning user re-reads this on a tired
+  Sunday. Every extra word is friction.
+
+You will be given the project's name, existing brain (may be empty), recent
+updates (newest first), current work threads, and decision history.
 
 You MUST respond with ONLY a JSON object, no prose, no code fences. Schema:
 {
-  "currentFocus": "<one sentence, max 120 chars — shown on the dashboard>",
-  "whatIsThis": "<2-4 sentences>",
-  "productState": "<bullets, what's shipped vs in-progress vs broken>",
-  "architecture": "<stack + key design decisions, bullets ok>",
-  "strategicDirection": "<goals & priorities, bullets>",
-  "recentProgress": "<what's actually moved in the last few updates>",
-  "openQuestions": "<unresolved technical/strategic issues, bullets>",
-  "nextActions": "<concrete next moves, ordered, bullets>"
+  "currentFocus": "<one observational sentence, max 120 chars. What the work has been about. Shown on the dashboard. NOT a directive.>",
+  "currentState": "<2-4 sentences. What this project IS right now — purpose, current operational reality, where things stand. NOT an introduction document. Combines 'what is this' and 'how it stands' into one tight summary.>",
+  "whatChangedRecently": "<3-6 short bullets of what has moved recently. Past/present tense. 'Stripe checkout wired in.' NOT 'Finished Stripe checkout.'>",
+  "currentDirection": "<3-5 short bullets of where work is currently aimed. Descriptive, not prescriptive. 'Heading toward beta launch with three customers in mind.' NOT 'Launch the beta.'>",
+  "architectureSnapshot": "<minimal: stack + key load-bearing decisions. Bullets ok. Skip if not enough signal.>",
+  "openThreads": "<active conversations, unresolved questions, in-flight work. Short bullets. Observational, not 'TODOs'.>"
 }
 
-Fields may be empty strings if there is genuinely no information yet — never invent.`;
+Empty strings are fine when there is genuinely no signal — never invent. If
+the only updates are noise, return mostly-empty fields and a brief currentState.`;
 
 export type ClassifyResult = {
   projectSlug: string | null;
@@ -102,13 +110,11 @@ export function isValidCategory(c: string): c is Category {
 
 type BrainPayload = {
   currentFocus: string;
-  whatIsThis: string;
-  productState: string;
-  architecture: string;
-  strategicDirection: string;
-  recentProgress: string;
-  openQuestions: string;
-  nextActions: string;
+  currentState: string;
+  whatChangedRecently: string;
+  currentDirection: string;
+  architectureSnapshot: string;
+  openThreads: string;
 };
 
 export async function synthesizeBrain(projectId: string): Promise<void> {
@@ -127,26 +133,20 @@ export async function synthesizeBrain(projectId: string): Promise<void> {
   const existingText = existing
     ? `Existing brain (may be stale — overwrite as needed):
 
-# What is this?
-${existing.whatIsThis ?? ""}
+# Current state
+${existing.currentState ?? ""}
 
-# Product state
-${existing.productState ?? ""}
+# What changed recently
+${existing.whatChangedRecently ?? ""}
 
-# Architecture
-${existing.architecture ?? ""}
+# Current direction
+${existing.currentDirection ?? ""}
 
-# Strategic direction
-${existing.strategicDirection ?? ""}
+# Architecture snapshot
+${existing.architectureSnapshot ?? ""}
 
-# Recent progress
-${existing.recentProgress ?? ""}
-
-# Open questions
-${existing.openQuestions ?? ""}
-
-# Next actions
-${existing.nextActions ?? ""}`
+# Open threads
+${existing.openThreads ?? ""}`
     : "Existing brain: (none yet)";
 
   const updatesText = project.updates.length
@@ -204,32 +204,28 @@ Synthesize the current brain. Return the JSON object only.`;
   try {
     payload = parseJson<BrainPayload>(raw);
   } catch {
-    // model returned unparseable output — fail safe by storing raw into recentProgress
+    // model returned unparseable output — fail safe by stashing the raw
+    // into currentState so the user at least sees something on the page.
     payload = {
       currentFocus: "",
-      whatIsThis: "",
-      productState: "",
-      architecture: "",
-      strategicDirection: "",
-      recentProgress: raw.slice(0, 4000),
-      openQuestions: "",
-      nextActions: "",
+      currentState: raw.slice(0, 4000),
+      whatChangedRecently: "",
+      currentDirection: "",
+      architectureSnapshot: "",
+      openThreads: "",
     };
   }
 
   // Defensive normalization: even with "respond with strings" in the prompt,
-  // models (esp. gpt-4o-mini) sometimes return arrays for bullet-y fields
-  // like nextActions / openQuestions. Coerce anything not-a-string into a
+  // models sometimes return arrays. Coerce anything non-string into a
   // bulleted string so the Brain schema's String? columns accept it.
   const normalized: BrainPayload = {
     currentFocus: asString(payload.currentFocus),
-    whatIsThis: asString(payload.whatIsThis),
-    productState: asString(payload.productState),
-    architecture: asString(payload.architecture),
-    strategicDirection: asString(payload.strategicDirection),
-    recentProgress: asString(payload.recentProgress),
-    openQuestions: asString(payload.openQuestions),
-    nextActions: asString(payload.nextActions),
+    currentState: asString(payload.currentState),
+    whatChangedRecently: asString(payload.whatChangedRecently),
+    currentDirection: asString(payload.currentDirection),
+    architectureSnapshot: asString(payload.architectureSnapshot),
+    openThreads: asString(payload.openThreads),
   };
 
   const model = await activeModelName(project.workspaceId);

@@ -104,19 +104,27 @@ model Project {
   @@index([workspaceId, updatedAt])
 }
 
+// The synthesized snapshot of a project. Five user-facing sections (plus
+// currentFocus for the dashboard preview), shaped around "rapid contextual
+// rehydration" — re-read this on a tired Sunday and instantly recognize
+// where things stand. NOT a task list, NOT prescriptive.
 model Brain {
   id        String   @id @default(cuid())
   projectId String   @unique
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  whatIsThis         String?
-  productState       String?
-  architecture       String?
-  strategicDirection String?
-  recentProgress     String?
-  openQuestions      String?
-  nextActions        String?
-  currentFocus       String?
+  // One observational sentence. Shown on the dashboard preview row.
+  currentFocus         String?
+  // What this project IS right now (purpose + current operational reality).
+  currentState         String?
+  // What's moved recently (bullets, descriptive past/present).
+  whatChangedRecently  String?
+  // Where work is currently aimed (descriptive, not prescriptive).
+  currentDirection     String?
+  // Stack + key load-bearing technical decisions.
+  architectureSnapshot String?
+  // Active conversations, unresolved questions, in-flight work.
+  openThreads          String?
 
   lastSynthesizedAt DateTime?
   synthesisModel    String?

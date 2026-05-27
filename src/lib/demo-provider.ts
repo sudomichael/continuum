@@ -70,14 +70,12 @@ function brainResponse(userPrompt: string) {
   const name = nameMatch ? nameMatch[1] : "this project";
 
   return {
-    currentFocus: `[demo] Active iteration on ${name} — see recent updates for live state.`,
-    whatIsThis: `[demo] ${name} is one of the user's active nodes. This brain was synthesized by the canned demo provider — wire a real Anthropic or OpenAI key in /settings to get genuine synthesis.`,
-    productState: `[demo]\n- core flows wired\n- onboarding in flux\n- 1-2 known issues outstanding`,
-    architecture: `[demo]\n- Next.js + Postgres\n- key dependencies pinned\n- deploys via Docker compose`,
-    strategicDirection: `[demo]\n- ship the smallest end-to-end loop\n- defer multi-user until first paid customer\n- focus on momentum, not surface area`,
-    recentProgress: `[demo] Recent sessions touched routing, copy, and a small refactor of the editor. Synthesis is canned in demo mode.`,
-    openQuestions: `[demo]\n- pricing model still unsettled\n- which platform first?`,
-    nextActions: `[demo]\n1. wire a real API key in /settings\n2. run a Claude Code session in this project\n3. re-synthesize`,
+    currentFocus: `[demo] ${name} — live state appears here once a real API key is configured.`,
+    currentState: `[demo] ${name} is one of the user's active nodes. This brain was synthesized by the canned demo provider — wire a real API key in /settings to get genuine synthesis.`,
+    whatChangedRecently: `[demo]\n- Recent sessions touched routing, copy, and a small refactor of the editor.\n- Synthesis is canned in demo mode.`,
+    currentDirection: `[demo]\n- Heading toward the smallest end-to-end loop.\n- Multi-user deferred until the first paid customer.`,
+    architectureSnapshot: `[demo]\n- Next.js + Postgres.\n- Key dependencies pinned.\n- Docker compose for local Postgres.`,
+    openThreads: `[demo]\n- Pricing model still unsettled.\n- Platform-first ordering still open.`,
   };
 }
 

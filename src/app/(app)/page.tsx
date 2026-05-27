@@ -5,8 +5,6 @@ import { homedir } from "node:os";
 import { prisma } from "@/lib/db";
 import { Icon } from "@/components/icon";
 import { StatusPip } from "@/components/status-pip";
-import { HealthRing } from "@/components/health-ring";
-import { MomentumBars } from "@/components/momentum-bars";
 import { timeAgo } from "@/lib/format";
 import { OnboardingGate } from "@/components/onboarding-gate";
 import { OnboardingProviderForm } from "@/components/onboarding-provider-form";
@@ -99,19 +97,19 @@ continuum connect`,
     orderBy: [{ updatedAt: "desc" }],
   });
 
-  const blockerCountsByProject = await prisma.update.groupBy({
-    by: ["projectId"],
-    where: { category: "blocker", project: { workspaceId } },
-    _count: { _all: true },
-  });
-  const blockerMap = new Map(
-    blockerCountsByProject.map((r) => [r.projectId, r._count._all]),
-  );
-
-  const recentBlockers = await prisma.update.findMany({
-    where: { category: "blocker", project: { workspaceId } },
+  // A small "recently noted" feed — observational, not an alert queue.
+  // We pull whatever the latest synthesized updates *across all projects*
+  // are, regardless of category, so it reads as ambient situational
+  // awareness instead of a blocker triage list.
+  const recentlyNoted = await prisma.update.findMany({
+    where: {
+      project: { workspaceId },
+      // skip raw session bodies — they're noise at the dashboard level.
+      // Only show things the synthesizer fanned out into categories.
+      category: { in: ["decision", "blocker", "next_action", "architecture"] },
+    },
     orderBy: { createdAt: "desc" },
-    take: 5,
+    take: 6,
     include: { project: true },
   });
 
@@ -119,10 +117,10 @@ continuum connect`,
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-[32px] leading-[40px] tracking-[-0.02em] text-on-surface">
-          Executive Dashboard
+          Current operational landscape
         </h1>
         <p className="code-md text-on-surface-variant/70 mt-1">
-          Operational state across every active project.
+          Where each project stands right now.
         </p>
       </div>
 
@@ -149,20 +147,20 @@ continuum connect`,
         </div>
       ) : (
         <div className="border border-outline-variant rounded-lg bg-surface-container-lowest overflow-hidden">
-          <div className="grid grid-cols-[1.5fr_100px_2fr_80px_80px_120px] bg-surface-container-high border-b border-outline-variant px-4 py-2">
-            <div className="label-caps text-on-surface-variant">PROJECT</div>
-            <div className="label-caps text-on-surface-variant text-center">STATE</div>
-            <div className="label-caps text-on-surface-variant">FOCUS</div>
-            <div className="label-caps text-on-surface-variant text-center">BLOCKS</div>
-            <div className="label-caps text-on-surface-variant text-center">HEALTH</div>
-            <div className="label-caps text-on-surface-variant">MOMENTUM</div>
+          {/* Three columns: project, state, current focus. No health bars,
+              no momentum, no blocker counts — those framed the dashboard as
+              a management surface. This is an observational map. */}
+          <div className="grid grid-cols-[1.5fr_120px_3fr] bg-surface-container-high border-b border-outline-variant px-4 py-2">
+            <div className="label-caps text-on-surface-variant">Project</div>
+            <div className="label-caps text-on-surface-variant text-center">State</div>
+            <div className="label-caps text-on-surface-variant">Current focus</div>
           </div>
           <div className="divide-y divide-outline-variant/30">
             {projects.map((p) => (
               <Link
                 key={p.id}
                 href={`/projects/${p.slug}`}
-                className="grid grid-cols-[1.5fr_100px_2fr_80px_80px_120px] px-4 py-2 items-center hover:bg-surface-variant/30 transition-colors"
+                className="grid grid-cols-[1.5fr_120px_3fr] px-4 py-3 items-center hover:bg-surface-variant/30 transition-colors"
               >
                 <div className="flex items-center gap-4 min-w-0">
                   <div className="w-8 h-8 bg-surface-container-highest border border-outline-variant flex items-center justify-center rounded shrink-0">
@@ -186,41 +184,36 @@ continuum connect`,
                 <div className="code-sm text-on-surface-variant/80 truncate">
                   {p.brain?.currentFocus ?? "—"}
                 </div>
-                <div className="text-center code-md font-bold text-tertiary">
-                  {blockerMap.get(p.id) ?? 0}
-                </div>
-                <div className="flex justify-center">
-                  <HealthRing value={p.health} />
-                </div>
-                <div>
-                  <MomentumBars value={p.momentum} />
-                </div>
               </Link>
             ))}
           </div>
         </div>
       )}
 
-      {recentBlockers.length > 0 && (
+      {recentlyNoted.length > 0 && (
         <section className="border border-outline-variant rounded-lg bg-surface-container-low p-4">
-          <h2 className="label-caps text-tertiary mb-4">RECENT_BLOCKERS</h2>
+          {/* Renamed from "RECENT_BLOCKERS" to "Recently noted". Same data,
+              entirely different emotional read — observation, not an alert. */}
+          <h2 className="label-caps text-on-surface-variant mb-3">
+            Recently noted across projects
+          </h2>
           <ul className="space-y-2">
-            {recentBlockers.map((b) => (
+            {recentlyNoted.map((u) => (
               <li
-                key={b.id}
+                key={u.id}
                 className="flex items-start gap-4 text-[13px]"
               >
-                <span className="label-caps text-on-surface-variant/60 shrink-0 mt-1">
-                  {timeAgo(b.createdAt)}
+                <span className="label-caps text-[9px] text-on-surface-variant/60 shrink-0 mt-1 w-12">
+                  {timeAgo(u.createdAt)}
                 </span>
                 <Link
-                  href={`/projects/${b.project.slug}`}
-                  className="code-sm text-primary shrink-0"
+                  href={`/projects/${u.project.slug}`}
+                  className="code-sm text-primary shrink-0 w-32 truncate"
                 >
-                  {b.project.slug}
+                  {u.project.slug}
                 </Link>
                 <span className="text-on-surface truncate">
-                  {b.title ?? b.body.slice(0, 120)}
+                  {u.title ?? u.body.slice(0, 120)}
                 </span>
               </li>
             ))}
